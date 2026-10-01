@@ -1,16 +1,17 @@
-const mysql = require('mysql2');
-require('dotenv').config();
+const initTableQuery = `
+  CREATE TABLE IF NOT EXISTS proposal_versions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    proposal_id INT,
+    version INT,
+    content TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+`;
 
-const pool = mysql.createPool({
-    host: process.env.DB_HOST || 'localhost',
-    port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 3306,
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'final_year_project_management',
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : undefined
+pool.query(initTableQuery, (err) => {
+  if (err) {
+    console.error('Failed to create proposal_versions table:', err.message);
+  } else {
+    console.log('proposal_versions table checked/created successfully.');
+  }
 });
-
-module.exports = pool.promise();
