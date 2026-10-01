@@ -1,4 +1,4 @@
-const mysql = require('mysql2');
+const mysql = require('mysql2/promise');
 
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
@@ -22,12 +22,8 @@ const initTableQuery = `
   );
 `;
 
-pool.query(initTableQuery, (err) => {
-  if (err) {
-    console.error('Failed to create proposal_versions table:', err.message);
-  } else {
-    console.log('proposal_versions table checked/created successfully.');
-  }
-});
+pool.query(initTableQuery)
+  .then(() => console.log('proposal_versions table checked/created successfully.'))
+  .catch((err) => console.error('Failed to create proposal_versions table:', err.message));
 
 module.exports = pool;
