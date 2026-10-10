@@ -71,7 +71,6 @@ async function smartInsert(connection, tableName, customData) {
 // Database Schema Initializer
 (async () => {
     try {
-        // 1. Ensure staff table exists
         await db.query(`
             CREATE TABLE IF NOT EXISTS staff (
                 staff_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -84,7 +83,6 @@ async function smartInsert(connection, tableName, customData) {
             ) ENGINE=InnoDB;
         `);
 
-        // 2. Ensure project deadlines table exists
         await db.query(`
             CREATE TABLE IF NOT EXISTS project_deadlines (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -94,7 +92,6 @@ async function smartInsert(connection, tableName, customData) {
             ) ENGINE=InnoDB;
         `);
 
-        // 3. Ensure system notifications table exists
         await db.query(`
             CREATE TABLE IF NOT EXISTS system_notifications (
                 notification_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -105,7 +102,6 @@ async function smartInsert(connection, tableName, customData) {
             ) ENGINE=InnoDB;
         `);
 
-        // 4. Ensure deliverables table exists
         await db.query(`
             CREATE TABLE IF NOT EXISTS project_deliverables (
                 deliverable_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -117,7 +113,6 @@ async function smartInsert(connection, tableName, customData) {
             ) ENGINE=InnoDB;
         `);
 
-        // 5. Ensure supervisor allocations table exists
         await db.query(`
             CREATE TABLE IF NOT EXISTS supervisor_allocations (
                 allocation_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -127,7 +122,6 @@ async function smartInsert(connection, tableName, customData) {
             ) ENGINE=InnoDB;
         `);
 
-        // 6. Ensure project grades table exists
         await db.query(`
             CREATE TABLE IF NOT EXISTS project_grades (
                 grade_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -143,7 +137,6 @@ async function smartInsert(connection, tableName, customData) {
             ) ENGINE=InnoDB;
         `);
 
-        // 7. Check proposal_versions schema
         try {
             const [pvCols] = await db.query(`SHOW COLUMNS FROM proposal_versions`);
             const colNames = pvCols.map(c => c.Field);
@@ -151,7 +144,7 @@ async function smartInsert(connection, tableName, customData) {
                 await db.query(`ALTER TABLE proposal_versions ADD COLUMN feedback_notes TEXT NULL`);
             }
         } catch (pvErr) {
-            console.log('proposal_versions column check skipped:', pvErr.message);
+            console.log('proposal_versions check skipped:', pvErr.message);
         }
 
         console.log('All auxiliary tables verified/created successfully.');
@@ -219,7 +212,6 @@ app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
 
     try {
-        // Detect whether users table uses 'id' or 'user_id'
         const [uCols] = await db.query(`SHOW COLUMNS FROM users`);
         const idCol = uCols.some(c => c.Field === 'id') ? 'id' : 'user_id';
 
@@ -286,14 +278,17 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/allocations', async (req, res) => {
     try {
+        const [uCols] = await db.query(`SHOW COLUMNS FROM users`);
+        const idCol = uCols.some(c => c.Field === 'id') ? 'id' : 'user_id';
+
         const [students] = await db.query(`
             SELECT s.student_id, s.matric_no, u.full_name AS student_name, s.department,
                    st.staff_id, su.full_name AS supervisor_name
             FROM students s
-            JOIN users u ON s.user_id = u.user_id
+            JOIN users u ON s.user_id = u.\`${idCol}\`
             LEFT JOIN supervisor_allocations sa ON s.student_id = sa.student_id
             LEFT JOIN staff st ON sa.staff_id = st.staff_id
-            LEFT JOIN users su ON st.user_id = su.user_id
+            LEFT JOIN users su ON st.user_id = su.\`${idCol}\`
             ORDER BY s.student_id ASC
         `);
 
@@ -302,7 +297,7 @@ app.get('/api/allocations', async (req, res) => {
             const [rows] = await db.query(`
                 SELECT st.staff_id, u.full_name AS supervisor_name, st.staff_no, st.department
                 FROM staff st
-                JOIN users u ON st.user_id = u.user_id
+                JOIN users u ON st.user_id = u.\`${idCol}\`
             `);
             supervisors = rows;
         } catch (stErr) {
@@ -384,6 +379,9 @@ app.post('/api/deliverables/upload', upload.single('deliverableFile'), async (re
 
 app.get('/api/deliverables', async (req, res) => {
     try {
+        const [uCols] = await db.query(`SHOW COLUMNS FROM users`);
+        const idCol = uCols.some(c => c.Field === 'id') ? 'id' : 'user_id';
+
         const [docs] = await db.query(`
             SELECT 
                 d.deliverable_id,
@@ -397,7 +395,7 @@ app.get('/api/deliverables', async (req, res) => {
                 COALESCE(s.department, 'General') AS department
             FROM project_deliverables d
             LEFT JOIN students s ON d.student_id = s.student_id
-            LEFT JOIN users u ON s.user_id = u.user_id
+            LEFT JOIN users u ON s.user_id = u.\`${idCol}\`
             ORDER BY d.deliverable_id DESC
         `);
         res.json(docs);
@@ -440,13 +438,16 @@ function calculateGrade(total) {
 
 app.get('/api/grades', async (req, res) => {
     try {
+        const [uCols] = await db.query(`SHOW COLUMNS FROM users`);
+        const idCol = uCols.some(c => c.Field === 'id') ? 'id' : 'user_id';
+
         const [grades] = await db.query(`
             SELECT g.*, u.full_name AS grader_name, su.full_name AS student_name, st.matric_no, st.department
             FROM project_grades g
             JOIN staff staff_rec ON g.graded_by = staff_rec.staff_id
-            JOIN users u ON staff_rec.user_id = u.user_id
+            JOIN users u ON staff_rec.user_id = u.\`${idCol}\`
             JOIN students st ON g.student_id = st.student_id
-            JOIN users su ON st.user_id = su.user_id
+            JOIN users su ON st.user_id = su.\`${idCol}\`
         `);
         res.json(grades);
     } catch (error) {
@@ -514,11 +515,14 @@ app.post('/api/grades', async (req, res) => {
 
 app.get('/api/proposals', async (req, res) => {
     try {
+        const [uCols] = await db.query(`SHOW COLUMNS FROM users`);
+        const idCol = uCols.some(c => c.Field === 'id') ? 'id' : 'user_id';
+
         const [proposals] = await db.query(`
             SELECT 
                 p.proposal_id,
                 p.student_id,
-                u.user_id,
+                u.\`${idCol}\` AS user_id,
                 u.full_name AS student_name,
                 COALESCE(s.matric_no, 'N/A') AS matric_no,
                 COALESCE(s.department, 'Computer Science') AS department,
@@ -549,7 +553,7 @@ app.get('/api/proposals', async (req, res) => {
                 ), 1) AS latest_version
             FROM proposals p
             JOIN students s ON p.student_id = s.student_id
-            JOIN users u ON s.user_id = u.user_id
+            JOIN users u ON s.user_id = u.\`${idCol}\`
             ORDER BY p.proposal_id DESC
         `);
         res.json(proposals);
