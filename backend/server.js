@@ -9,7 +9,7 @@ require('dotenv').config();
 const db = require('./db');
 
 const app = express();
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecretprojectkey123';
+const JWT_SECRET = process.env.JWT_SECRET || 'university_project_management_secret_key_2026';
 
 app.use(cors());
 app.use(express.json());
@@ -221,9 +221,11 @@ app.post('/api/auth/login', async (req, res) => {
 
         const userDepartment = user.student_dept || user.staff_dept || 'Computer Science';
 
+        const secretKey = process.env.JWT_SECRET || 'university_project_management_secret_key_2026';
+
         const token = jwt.sign(
             { userId: user.user_id, email: user.email, role: user.role, department: userDepartment },
-            JWT_SECRET,
+            secretKey,
             { expiresIn: '1d' }
         );
 
