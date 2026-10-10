@@ -42,7 +42,15 @@ async function smartInsert(connection, tableName, customData) {
         if (customData[field] !== undefined && customData[field] !== null) {
             insertObj[field] = customData[field];
         } else if (col.Null === 'NO' && col.Default === null) {
-            if (field.includes('year')) insertObj[field] = '2025/2026';
+            if (field === 'role') {
+                if (col.Type && col.Type.startsWith('enum(')) {
+                    const firstOption = col.Type.match(/'([^']+)'/);
+                    insertObj[field] = firstOption ? firstOption[1] : 'student';
+                } else {
+                    insertObj[field] = 'student';
+                }
+            }
+            else if (field.includes('year')) insertObj[field] = '2025/2026';
             else if (field.includes('dept') || field.includes('department')) insertObj[field] = customData.department || 'Computer Science';
             else if (field.includes('prog') || field.includes('programme')) insertObj[field] = 'B.Eng / B.Sc';
             else if (field.includes('level')) insertObj[field] = '400';
@@ -52,7 +60,6 @@ async function smartInsert(connection, tableName, customData) {
             else insertObj[field] = 'Default';
         }
     }
-
     const columns = Object.keys(insertObj);
     const placeholders = columns.map(() => '?').join(', ');
     const values = Object.values(insertObj);
