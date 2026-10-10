@@ -212,65 +212,98 @@ app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
 
     try {
-        const [uCols] = await db.query(`SHOW COLUMNS FROM users`);
-        const idCol = uCols.some(c => c.Field === 'id') ? 'id' : 'user_id';
+        const cleanEmail = email ? email.trim().toLowerCase() : '';
 
+        // 1. Fetch user safely using wildcard so column names never cause SQL errors
         const [users] = await db.query(
-            `SELECT u.\`${idCol}\` AS user_id, u.email, u.password_hash, u.full_name,
-                    s.student_id, s.matric_no, s.department AS student_dept,
-                    st.staff_id, st.staff_no, st.designation, st.department AS staff_dept,
-                    CASE 
-                        WHEN s.student_id IS NOT NULL THEN 'STUDENT'
-                        WHEN st.designation = 'Project Coordinator' THEN 'COORDINATOR'
-                        WHEN st.staff_id IS NOT NULL THEN 'SUPERVISOR'
-                        ELSE 'STUDENT'
-                    END AS role
-             FROM users u
-             LEFT JOIN students s ON u.\`${idCol}\` = s.user_id
-             LEFT JOIN staff st ON u.\`${idCol}\` = st.user_id
-             WHERE LOWER(u.email) = ? OR (u.username IS NOT NULL AND LOWER(u.username) = ?)`,
-            [email.trim().toLowerCase(), email.trim().toLowerCase()]
+            `SELECT * FROM users WHERE LOWER(email) = ? OR (username IS NOT NULL AND LOWER(username) = ?) LIMIT 1`,
+            [cleanEmail, cleanEmail]
         );
 
-        if (users.length === 0) return res.status(401).json({ error: 'Invalid email or password.' });
-
-        const user = users[0];
-        let isMatch = false;
-        try {
-            isMatch = await bcrypt.compare(password, user.password_hash);
-        } catch (e) {
-            isMatch = (password === user.password_hash);
-        }
-
-        if (!isMatch && password !== user.password_hash) {
+        if (!users || users.length === 0) {
             return res.status(401).json({ error: 'Invalid email or password.' });
         }
 
-        const userDepartment = user.student_dept || user.staff_dept || 'Computer Science';
+        const rawUser = users[0];
+        const userId = rawUser.user_id || rawUser.id;
+        const passwordHash = rawUser.password_hash || rawUser.password || '';
+
+        // 2. Validate password
+        let isMatch = false;
+        try {
+            isMatch = await bcrypt.compare(password, passwordHash);
+        } catch (e) {
+            isMatch = (password === passwordHash);
+        }
+
+        if (!isMatch && password !== passwordHash) {
+            return res.status(401).json({ error: 'Invalid email or password.' });
+        }
+
+        // 3. Resolve role and profile details without fragile joins
+        let role = (rawUser.role ? rawUser.role.toUpperCase() : null);
+        let department = rawUser.department || 'Computer Science';
+        let studentId = null;
+        let matricNo = null;
+        let staffId = null;
+
+        try {
+            const [studentRows] = await db.query(`SELECT * FROM students WHERE user_id = ? LIMIT 1`, [userId]);
+            if (studentRows && studentRows.length > 0) {
+                const s = studentRows[0];
+                studentId = s.student_id || s.id;
+                matricNo = s.matric_no || s.matricNo || 'N/A';
+                if (s.department) department = s.department;
+                if (!role || role === 'STUDENT' || role === 'DEFAULT') role = 'STUDENT';
+            }
+        } catch (err) {
+            console.warn('Student check ignored:', err.message);
+        }
+
+        try {
+            const [staffRows] = await db.query(`SELECT * FROM staff WHERE user_id = ? LIMIT 1`, [userId]);
+            if (staffRows && staffRows.length > 0) {
+                const st = staffRows[0];
+                staffId = st.staff_id || st.id;
+                if (st.department) department = st.department;
+                if (st.designation === 'Project Coordinator') {
+                    role = 'COORDINATOR';
+                } else if (!role || role === 'DEFAULT' || role === 'STUDENT') {
+                    role = 'SUPERVISOR';
+                }
+            }
+        } catch (err) {
+            console.warn('Staff check ignored:', err.message);
+        }
+
+        if (!role || role === 'DEFAULT') {
+            role = 'STUDENT';
+        }
+
         const secretKey = process.env.JWT_SECRET || 'university_project_management_secret_key_2026';
 
         const token = jwt.sign(
-            { userId: user.user_id, email: user.email, role: user.role, department: userDepartment },
+            { userId, email: rawUser.email, role, department },
             secretKey,
             { expiresIn: '1d' }
         );
 
-        res.json({
+        return res.json({
             token,
             user: {
-                userId: user.user_id,
-                email: user.email,
-                fullName: user.full_name,
-                role: user.role,
-                department: userDepartment,
-                studentId: user.student_id,
-                matricNo: user.matric_no,
-                staffId: user.staff_id
+                userId,
+                email: rawUser.email,
+                fullName: rawUser.full_name || rawUser.name || 'User',
+                role,
+                department,
+                studentId,
+                matricNo,
+                staffId
             }
         });
     } catch (error) {
         console.error('LOGIN ERROR DETAILS:', error);
-        res.status(500).json({ error: `Login failed: ${error.message}` });
+        return res.status(500).json({ error: `Login failed: ${error.message}` });
     }
 });
 
