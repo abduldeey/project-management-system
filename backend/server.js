@@ -71,14 +71,30 @@ async function smartInsert(connection, tableName, customData) {
 // Database Schema Initializer
 (async () => {
     try {
+        // 1. Ensure staff table exists
+        await db.query(`
+            CREATE TABLE IF NOT EXISTS staff (
+                staff_id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                staff_no VARCHAR(50) DEFAULT 'STF/001',
+                department VARCHAR(100) DEFAULT 'Computer Science',
+                designation VARCHAR(100) DEFAULT 'Lecturer',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX (user_id)
+            ) ENGINE=InnoDB;
+        `);
+
+        // 2. Ensure project deadlines table exists
         await db.query(`
             CREATE TABLE IF NOT EXISTS project_deadlines (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 title VARCHAR(255) NOT NULL,
                 deadline_date DATETIME NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
+            ) ENGINE=InnoDB;
         `);
+
+        // 3. Ensure system notifications table exists
         await db.query(`
             CREATE TABLE IF NOT EXISTS system_notifications (
                 notification_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -86,8 +102,10 @@ async function smartInsert(connection, tableName, customData) {
                 message TEXT NOT NULL,
                 is_read BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
+            ) ENGINE=InnoDB;
         `);
+
+        // 4. Ensure deliverables table exists
         await db.query(`
             CREATE TABLE IF NOT EXISTS project_deliverables (
                 deliverable_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -96,16 +114,20 @@ async function smartInsert(connection, tableName, customData) {
                 file_name VARCHAR(255) NOT NULL,
                 file_url VARCHAR(255) NOT NULL,
                 uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
+            ) ENGINE=InnoDB;
         `);
+
+        // 5. Ensure supervisor allocations table exists
         await db.query(`
             CREATE TABLE IF NOT EXISTS supervisor_allocations (
                 allocation_id INT AUTO_INCREMENT PRIMARY KEY,
                 student_id INT NOT NULL UNIQUE,
                 staff_id INT NOT NULL,
                 allocated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
+            ) ENGINE=InnoDB;
         `);
+
+        // 6. Ensure project grades table exists
         await db.query(`
             CREATE TABLE IF NOT EXISTS project_grades (
                 grade_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -118,14 +140,21 @@ async function smartInsert(connection, tableName, customData) {
                 remarks TEXT NULL,
                 graded_by INT NOT NULL,
                 graded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-            )
+            ) ENGINE=InnoDB;
         `);
 
-        const [pvCols] = await db.query(`SHOW COLUMNS FROM proposal_versions`);
-        const colNames = pvCols.map(c => c.Field);
-        if (!colNames.includes('feedback_notes')) {
-            await db.query(`ALTER TABLE proposal_versions ADD COLUMN feedback_notes TEXT NULL`);
+        // 7. Check proposal_versions schema
+        try {
+            const [pvCols] = await db.query(`SHOW COLUMNS FROM proposal_versions`);
+            const colNames = pvCols.map(c => c.Field);
+            if (!colNames.includes('feedback_notes')) {
+                await db.query(`ALTER TABLE proposal_versions ADD COLUMN feedback_notes TEXT NULL`);
+            }
+        } catch (pvErr) {
+            console.log('proposal_versions column check skipped:', pvErr.message);
         }
+
+        console.log('All auxiliary tables verified/created successfully.');
     } catch (e) {
         console.error('Table init error:', e.message);
     }
@@ -139,6 +168,7 @@ app.post('/api/auth/register', async (req, res) => {
         return res.status(400).json({ error: 'All primary fields are required.' });
     }
 
+    const normalizedRole = role.toUpperCase();
     const selectedDept = department || 'Computer Science';
     const connection = await db.getConnection();
     try {
@@ -155,7 +185,7 @@ app.post('/api/auth/register', async (req, res) => {
 
         const newUserId = userResult.insertId;
 
-        if (role === 'STUDENT') {
+        if (normalizedRole === 'STUDENT') {
             const cleanMatric = matric_no ? matric_no.trim() : `U22/${selectedDept.slice(0, 2).toUpperCase()}/${Date.now().toString().slice(-4)}`;
             await smartInsert(connection, 'students', {
                 user_id: newUserId,
@@ -164,13 +194,13 @@ app.post('/api/auth/register', async (req, res) => {
                 programme: `B.Sc / B.Eng in ${selectedDept}`,
                 academic_year: '2025/2026'
             });
-        } else if (role === 'SUPERVISOR' || role === 'COORDINATOR') {
+        } else if (normalizedRole === 'SUPERVISOR' || normalizedRole === 'COORDINATOR') {
             const cleanStaff = staff_no ? staff_no.trim() : `STF/${Date.now().toString().slice(-4)}`;
             await smartInsert(connection, 'staff', {
                 user_id: newUserId,
                 staff_no: cleanStaff,
                 department: selectedDept,
-                designation: role === 'COORDINATOR' ? 'Project Coordinator' : 'Lecturer'
+                designation: normalizedRole === 'COORDINATOR' ? 'Project Coordinator' : 'Lecturer'
             });
         }
 
@@ -178,6 +208,7 @@ app.post('/api/auth/register', async (req, res) => {
         res.status(201).json({ message: 'User registered successfully.' });
     } catch (error) {
         await connection.rollback();
+        console.error('REGISTRATION ERROR:', error);
         res.status(500).json({ error: `Registration error: ${error.message}` });
     } finally {
         connection.release();
@@ -196,7 +227,7 @@ app.post('/api/auth/login', async (req, res) => {
                         WHEN s.student_id IS NOT NULL THEN 'STUDENT'
                         WHEN st.designation = 'Project Coordinator' THEN 'COORDINATOR'
                         WHEN st.staff_id IS NOT NULL THEN 'SUPERVISOR'
-                        ELSE 'USER'
+                        ELSE 'STUDENT'
                     END AS role
              FROM users u
              LEFT JOIN students s ON u.user_id = s.user_id
@@ -220,7 +251,6 @@ app.post('/api/auth/login', async (req, res) => {
         }
 
         const userDepartment = user.student_dept || user.staff_dept || 'Computer Science';
-
         const secretKey = process.env.JWT_SECRET || 'university_project_management_secret_key_2026';
 
         const token = jwt.sign(
@@ -263,14 +293,21 @@ app.get('/api/allocations', async (req, res) => {
             ORDER BY s.student_id ASC
         `);
 
-        const [supervisors] = await db.query(`
-            SELECT st.staff_id, u.full_name AS supervisor_name, st.staff_no, st.department
-            FROM staff st
-            JOIN users u ON st.user_id = u.user_id
-        `);
+        let supervisors = [];
+        try {
+            const [rows] = await db.query(`
+                SELECT st.staff_id, u.full_name AS supervisor_name, st.staff_no, st.department
+                FROM staff st
+                JOIN users u ON st.user_id = u.user_id
+            `);
+            supervisors = rows;
+        } catch (stErr) {
+            console.error('Staff query fallback:', stErr.message);
+        }
 
         res.json({ students, supervisors });
     } catch (error) {
+        console.error('Allocations error:', error);
         res.status(500).json({ error: 'Failed to fetch allocations' });
     }
 });
@@ -455,7 +492,6 @@ app.post('/api/grades', async (req, res) => {
                 graded_by = VALUES(graded_by)
         `, [student_id, doc, impl, pres, total, letterGrade, remarks || '', validStaffId]);
 
-        // Send alert to student
         const [studentUser] = await db.query(`SELECT user_id FROM students WHERE student_id = ?`, [student_id]);
         if (studentUser.length > 0) {
             await db.query(
@@ -505,7 +541,7 @@ app.get('/api/proposals', async (req, res) => {
                 COALESCE((
                     SELECT MAX(pv.version_number) 
                     FROM proposal_versions pv 
-                    WHERE pv.proposal_id = p.proposal_id
+                    WHERE pv.proposal_id = p.proposal_id 
                 ), 1) AS latest_version
             FROM proposals p
             JOIN students s ON p.student_id = s.student_id
