@@ -214,10 +214,10 @@ app.post('/api/auth/login', async (req, res) => {
     try {
         const cleanEmail = email ? email.trim().toLowerCase() : '';
 
-        // 1. Fetch user safely using wildcard so column names never cause SQL errors
+        // Query strictly by email — no username column referenced
         const [users] = await db.query(
-            `SELECT * FROM users WHERE LOWER(email) = ? OR (username IS NOT NULL AND LOWER(username) = ?) LIMIT 1`,
-            [cleanEmail, cleanEmail]
+            `SELECT * FROM users WHERE LOWER(email) = ? LIMIT 1`,
+            [cleanEmail]
         );
 
         if (!users || users.length === 0) {
@@ -228,7 +228,6 @@ app.post('/api/auth/login', async (req, res) => {
         const userId = rawUser.user_id || rawUser.id;
         const passwordHash = rawUser.password_hash || rawUser.password || '';
 
-        // 2. Validate password
         let isMatch = false;
         try {
             isMatch = await bcrypt.compare(password, passwordHash);
@@ -240,8 +239,7 @@ app.post('/api/auth/login', async (req, res) => {
             return res.status(401).json({ error: 'Invalid email or password.' });
         }
 
-        // 3. Resolve role and profile details without fragile joins
-        let role = (rawUser.role ? rawUser.role.toUpperCase() : null);
+        let role = rawUser.role ? String(rawUser.role).toUpperCase() : null;
         let department = rawUser.department || 'Computer Science';
         let studentId = null;
         let matricNo = null;
@@ -256,9 +254,7 @@ app.post('/api/auth/login', async (req, res) => {
                 if (s.department) department = s.department;
                 if (!role || role === 'STUDENT' || role === 'DEFAULT') role = 'STUDENT';
             }
-        } catch (err) {
-            console.warn('Student check ignored:', err.message);
-        }
+        } catch (err) {}
 
         try {
             const [staffRows] = await db.query(`SELECT * FROM staff WHERE user_id = ? LIMIT 1`, [userId]);
@@ -272,9 +268,7 @@ app.post('/api/auth/login', async (req, res) => {
                     role = 'SUPERVISOR';
                 }
             }
-        } catch (err) {
-            console.warn('Staff check ignored:', err.message);
-        }
+        } catch (err) {}
 
         if (!role || role === 'DEFAULT') {
             role = 'STUDENT';
