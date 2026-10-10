@@ -219,8 +219,12 @@ app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
 
     try {
+        // Detect whether users table uses 'id' or 'user_id'
+        const [uCols] = await db.query(`SHOW COLUMNS FROM users`);
+        const idCol = uCols.some(c => c.Field === 'id') ? 'id' : 'user_id';
+
         const [users] = await db.query(
-            `SELECT u.user_id, u.email, u.password_hash, u.full_name,
+            `SELECT u.\`${idCol}\` AS user_id, u.email, u.password_hash, u.full_name,
                     s.student_id, s.matric_no, s.department AS student_dept,
                     st.staff_id, st.staff_no, st.designation, st.department AS staff_dept,
                     CASE 
@@ -230,8 +234,8 @@ app.post('/api/auth/login', async (req, res) => {
                         ELSE 'STUDENT'
                     END AS role
              FROM users u
-             LEFT JOIN students s ON u.user_id = s.user_id
-             LEFT JOIN staff st ON u.user_id = st.user_id
+             LEFT JOIN students s ON u.\`${idCol}\` = s.user_id
+             LEFT JOIN staff st ON u.\`${idCol}\` = st.user_id
              WHERE LOWER(u.email) = ? OR (u.username IS NOT NULL AND LOWER(u.username) = ?)`,
             [email.trim().toLowerCase(), email.trim().toLowerCase()]
         );
