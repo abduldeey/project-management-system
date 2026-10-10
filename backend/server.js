@@ -155,6 +155,8 @@ async function smartInsert(connection, tableName, customData) {
 
 // --- 1. USER AUTHENTICATION ---
 
+// --- 1. USER AUTHENTICATION ---
+
 app.post('/api/auth/register', async (req, res) => {
     const { email, password, full_name, role, matric_no, staff_no, department } = req.body;
     if (!email || !password || !full_name || !role) {
@@ -169,11 +171,15 @@ app.post('/api/auth/register', async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
         const derivedUsername = email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '') + '_' + Date.now().toString().slice(-4);
 
+        // Store into both password and password_hash so whichever column exists gets the hash
         const [userResult] = await smartInsert(connection, 'users', {
             username: derivedUsername,
             email: email.trim().toLowerCase(),
+            password: hashedPassword,
             password_hash: hashedPassword,
-            full_name: full_name.trim()
+            full_name: full_name.trim(),
+            name: full_name.trim(),
+            role: normalizedRole
         });
 
         const newUserId = userResult.insertId;
@@ -182,6 +188,7 @@ app.post('/api/auth/register', async (req, res) => {
             const cleanMatric = matric_no ? matric_no.trim() : `U22/${selectedDept.slice(0, 2).toUpperCase()}/${Date.now().toString().slice(-4)}`;
             await smartInsert(connection, 'students', {
                 user_id: newUserId,
+                id: newUserId,
                 matric_no: cleanMatric,
                 department: selectedDept,
                 programme: `B.Sc / B.Eng in ${selectedDept}`,
@@ -191,6 +198,7 @@ app.post('/api/auth/register', async (req, res) => {
             const cleanStaff = staff_no ? staff_no.trim() : `STF/${Date.now().toString().slice(-4)}`;
             await smartInsert(connection, 'staff', {
                 user_id: newUserId,
+                id: newUserId,
                 staff_no: cleanStaff,
                 department: selectedDept,
                 designation: normalizedRole === 'COORDINATOR' ? 'Project Coordinator' : 'Lecturer'
@@ -214,29 +222,35 @@ app.post('/api/auth/login', async (req, res) => {
     try {
         const cleanEmail = email ? email.trim().toLowerCase() : '';
 
-        // Query strictly by email — no username column referenced
+        // Query by email
         const [users] = await db.query(
             `SELECT * FROM users WHERE LOWER(email) = ? LIMIT 1`,
             [cleanEmail]
         );
 
         if (!users || users.length === 0) {
-            return res.status(401).json({ error: 'Invalid email or password.' });
+            return res.status(401).json({ error: 'No account found with this email address.' });
         }
 
         const rawUser = users[0];
         const userId = rawUser.user_id || rawUser.id;
-        const passwordHash = rawUser.password_hash || rawUser.password || '';
+        
+        // Grab whatever password column actually has data in it
+        const storedHash = rawUser.password_hash || rawUser.password || rawUser.pass || '';
+
+        if (!storedHash) {
+            return res.status(500).json({ error: `User found but password hash column is null. Columns: ${Object.keys(rawUser).join(', ')}` });
+        }
 
         let isMatch = false;
         try {
-            isMatch = await bcrypt.compare(password, passwordHash);
+            isMatch = await bcrypt.compare(password, storedHash);
         } catch (e) {
-            isMatch = (password === passwordHash);
+            isMatch = (password === storedHash);
         }
 
-        if (!isMatch && password !== passwordHash) {
-            return res.status(401).json({ error: 'Invalid email or password.' });
+        if (!isMatch && password !== storedHash) {
+            return res.status(401).json({ error: 'Password does not match.' });
         }
 
         let role = rawUser.role ? String(rawUser.role).toUpperCase() : null;
@@ -246,7 +260,7 @@ app.post('/api/auth/login', async (req, res) => {
         let staffId = null;
 
         try {
-            const [studentRows] = await db.query(`SELECT * FROM students WHERE user_id = ? LIMIT 1`, [userId]);
+            const [studentRows] = await db.query(`SELECT * FROM students WHERE user_id = ? OR id = ? LIMIT 1`, [userId, userId]);
             if (studentRows && studentRows.length > 0) {
                 const s = studentRows[0];
                 studentId = s.student_id || s.id;
@@ -257,7 +271,7 @@ app.post('/api/auth/login', async (req, res) => {
         } catch (err) {}
 
         try {
-            const [staffRows] = await db.query(`SELECT * FROM staff WHERE user_id = ? LIMIT 1`, [userId]);
+            const [staffRows] = await db.query(`SELECT * FROM staff WHERE user_id = ? OR id = ? LIMIT 1`, [userId]);
             if (staffRows && staffRows.length > 0) {
                 const st = staffRows[0];
                 staffId = st.staff_id || st.id;
