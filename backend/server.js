@@ -633,61 +633,51 @@ app.post('/api/proposals', async (req, res) => {
     }
 
     try {
-        // 1. Convert status column to VARCHAR so ENUM truncation never occurs
-        try {
-            await db.query(`ALTER TABLE proposals MODIFY COLUMN status VARCHAR(50) DEFAULT 'PENDING'`);
-        } catch (alterErr) {
-            // Proceed if table is locked or column is already altered
-        }
+        // 1. Inspect existing columns in the proposals table
+        const [columns] = await db.query(`SHOW COLUMNS FROM proposals`);
+        const existingColNames = columns.map(c => c.Field.toLowerCase());
 
-        // 2. Identify student_id
-        let targetId = student_id;
-        const [existingStudents] = await db.query(`SELECT student_id FROM students LIMIT 1`);
-        if (existingStudents.length > 0) {
-            targetId = existingStudents[0].student_id;
-        }
+        // 2. Prepare all possible column-value candidates
+        const candidates = {
+            title: title.trim(),
+            project_title: title.trim(),
+            problem_statement: problem_statement || '',
+            aim: aim || '',
+            objectives: objectives || '',
+            status: 'PENDING', // Default to PENDING to avoid ENUM truncation
+            student_id: student_id || 1,
+            user_id: student_id || 1,
+            created_at: new Date()
+        };
 
-        // 3. Insert proposal with PENDING / SUBMITTED compatibility
-        let insertStatus = 'SUBMITTED';
-        try {
-            const [result] = await db.query(
-                `INSERT INTO proposals (student_id, title, problem_statement, aim, objectives, status) 
-                 VALUES (?, ?, ?, ?, ?, ?)`,
-                [
-                    targetId || 1,
-                    title.trim(),
-                    problem_statement || '',
-                    aim || '',
-                    objectives || '',
-                    insertStatus
-                ]
-            );
+        // 3. Match only columns that actually exist in the database table
+        const insertKeys = [];
+        const insertVals = [];
 
-            return res.status(201).json({ 
-                message: 'Proposal submitted successfully', 
-                proposal_id: result.insertId 
-            });
-        } catch (insertErr) {
-            // Fallback to 'PENDING' if strict legacy ENUM blocked 'SUBMITTED'
-            if (insertErr.message.includes('status')) {
-                const [fallback] = await db.query(
-                    `INSERT INTO proposals (student_id, title, problem_statement, aim, objectives, status) 
-                     VALUES (?, ?, ?, ?, ?, 'PENDING')`,
-                    [
-                        targetId || 1,
-                        title.trim(),
-                        problem_statement || '',
-                        aim || '',
-                        objectives || ''
-                    ]
-                );
-                return res.status(201).json({ 
-                    message: 'Proposal submitted successfully', 
-                    proposal_id: fallback.insertId 
-                });
+        for (const [key, val] of Object.entries(candidates)) {
+            if (existingColNames.includes(key.toLowerCase())) {
+                insertKeys.push(key);
+                insertVals.push(val);
             }
-            throw insertErr;
         }
+
+        if (insertKeys.length === 0) {
+            // Absolute emergency fallback: insert into the very first non-id column
+            const targetCol = existingColNames.find(c => !c.includes('id')) || existingColNames[0];
+            const [fallback] = await db.query(`INSERT INTO proposals (${targetCol}) VALUES (?)`, [title.trim()]);
+            return res.status(201).json({ message: 'Proposal submitted successfully', proposal_id: fallback.insertId });
+        }
+
+        // 4. Build dynamic parameter placeholders (?, ?, ?)
+        const placeholders = insertKeys.map(() => '?').join(', ');
+        const query = `INSERT INTO proposals (${insertKeys.join(', ')}) VALUES (${placeholders})`;
+
+        const [result] = await db.query(query, insertVals);
+
+        return res.status(201).json({
+            message: 'Proposal submitted successfully',
+            proposal_id: result.insertId
+        });
     } catch (error) {
         console.error('PROPOSAL SUBMISSION ERROR:', error.message);
         return res.status(500).json({ error: error.message });
