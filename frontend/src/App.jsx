@@ -176,21 +176,41 @@ export default function App() {
     e.preventDefault();
     setIsProcessing(true);
     try {
+      let cleanDate = deadlineForm.due_date;
+      if (cleanDate && cleanDate.includes('/')) {
+        const parts = cleanDate.split('/');
+        if (parts.length === 3) {
+          // Converts DD/MM/YYYY to YYYY-MM-DD
+          cleanDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+        }
+      }
+
       const res = await fetch(`${API_BASE}/api/deadlines`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(deadlineForm)
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          title: deadlineForm.title,
+          due_date: cleanDate,
+          deadline_date: cleanDate,
+          description: deadlineForm.description || ''
+        })
       });
+
+      const resData = await res.json().catch(() => ({}));
+
       if (res.ok) {
         setDeadlineForm({ title: '', due_date: '', description: '' });
         setShowDeadlineModal(false);
         await fetchData();
         alert('Deadline created successfully');
       } else {
-        alert('Failed to set deadline');
+        alert('Failed to set deadline: ' + (resData.error || res.statusText));
       }
     } catch (err) {
-      alert('Error creating deadline');
+      alert('Error creating deadline: ' + err.message);
     } finally {
       setIsProcessing(false);
     }
@@ -365,19 +385,23 @@ export default function App() {
             {isCoordinator && (
               <>
                 <button
-                  type="button"
-                  onClick={() => setShowAllocateModal(true)}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition"
-                >
-                  👥 Allocate
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowDeadlineModal(true)}
-                  className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition"
-                >
-                  + Set Deadline
-                </button>
+  type="button"
+  onClick={async () => {
+    setShowAllocateModal(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/allocations`);
+      if (res.ok) {
+        const data = await res.json();
+        setAllocations(data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }}
+  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition"
+>
+  👥 Allocate
+</button>
               </>
             )}
 
