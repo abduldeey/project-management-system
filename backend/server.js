@@ -383,32 +383,47 @@ app.post('/api/allocations', async (req, res) => {
             return res.status(400).json({ error: 'Please select both a student and a supervisor.' });
         }
 
-        // 1. Try allocations table with standard column names (student_id, supervisor_id)
+        // 1. Ensure allocations table exists
+        await db.query(`
+            CREATE TABLE IF NOT EXISTS allocations (
+                allocation_id INT AUTO_INCREMENT PRIMARY KEY,
+                student_id INT NOT NULL,
+                supervisor_id INT NOT NULL,
+                allocated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `).catch(() => {});
+
+        // 2. Insert into allocations table
         try {
             await db.query(
-                `INSERT INTO allocations (student_id, supervisor_id) VALUES (?, ?)
-                 ON DUPLICATE KEY UPDATE supervisor_id = VALUES(supervisor_id)`,
+                `INSERT INTO allocations (student_id, supervisor_id) VALUES (?, ?)`,
                 [sId, spId]
             );
-            return res.json({ message: 'Supervisor allocated successfully' });
         } catch (err1) {
-            // 2. Try staff_id if schema uses staff_id
             try {
                 await db.query(
-                    `INSERT INTO allocations (student_id, staff_id) VALUES (?, ?)
-                     ON DUPLICATE KEY UPDATE staff_id = VALUES(staff_id)`,
+                    `INSERT INTO allocations (student_id, staff_id) VALUES (?, ?)`,
                     [sId, spId]
                 );
-                return res.json({ message: 'Supervisor allocated successfully' });
             } catch (err2) {
-                // 3. Fallback: Update supervisor_id directly on the students table if allocations table doesn't exist
+                // Table might use user_id
                 await db.query(
-                    `UPDATE students SET supervisor_id = ? WHERE student_id = ? OR user_id = ?`,
-                    [spId, sId, sId]
+                    `INSERT INTO allocations (user_id, supervisor_id) VALUES (?, ?)`,
+                    [sId, spId]
                 );
-                return res.json({ message: 'Supervisor allocated successfully' });
             }
         }
+
+        // 3. Fallback: Update students table safely using user_id or id
+        try {
+            await db.query(`UPDATE students SET supervisor_id = ? WHERE user_id = ?`, [spId, sId]);
+        } catch (e1) {
+            try {
+                await db.query(`UPDATE students SET supervisor_id = ? WHERE id = ?`, [spId, sId]);
+            } catch (e2) {}
+        }
+
+        return res.json({ message: 'Supervisor allocated successfully' });
     } catch (err) {
         console.error('ALLOCATION ROUTE ERROR:', err.message);
         return res.status(500).json({ error: 'Allocation failed: ' + err.message });
@@ -505,23 +520,23 @@ app.get('/api/deliverables', async (req, res) => {
     try {
         const [rows] = await db.query(`
             SELECT 
-                d.deliverable_id,
-                d.chapter_title,
-                d.file_name,
-                d.file_url,
-                d.student_id,
-                COALESCE(u.full_name, u.name, 'Student') AS student_name,
-                COALESCE(s.matric_no, 'N/A') AS matric_no
-            FROM project_deliverables d
-            LEFT JOIN students s ON d.student_id = s.student_id OR d.student_id = s.user_id
-            LEFT JOIN users u ON s.user_id = u.user_id OR s.user_id = u.id
-            ORDER BY d.deliverable_id DESC
-        `);
-        res.json(rows);
-    } catch (error) {
-        console.error('DELIVERABLES FETCH ERROR:', error.message);
-        // Fallback to empty list so frontend remains responsive
-        res.json([]);
+                d.*, 
+                COALESCE(u.name, 'Student') AS student_name, 
+                COALESCE(s.matric_no, 'N/A') AS matric_no 
+            FROM deliverables d 
+            LEFT JOIN users u ON d.student_id = u.id OR d.student_id = u.user_id 
+            LEFT JOIN students s ON d.student_id = s.user_id OR d.student_id = s.id
+            ORDER BY d.created_at DESC
+        `).catch(async () => {
+            // Fallback if joined tables differ
+            const [simpleRows] = await db.query(`SELECT * FROM deliverables ORDER BY id DESC`);
+            return [simpleRows];
+        });
+
+        return res.json(rows || []);
+    } catch (err) {
+        console.error('DELIVERABLES FETCH ERROR:', err.message);
+        return res.json([]);
     }
 });
 
