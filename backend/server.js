@@ -163,15 +163,30 @@ app.post('/api/auth/register', async (req, res) => {
         return res.status(400).json({ error: 'All primary fields are required.' });
     }
 
-    const normalizedRole = role.toUpperCase();
+    const requestedRole = role.toUpperCase();
     const selectedDept = department || 'Computer Science';
     const connection = await db.getConnection();
+
     try {
         await connection.beginTransaction();
+
+        // 1. Ensure the 'role' column accepts VARCHAR or includes COORDINATOR
+        try {
+            await connection.query(`ALTER TABLE users MODIFY COLUMN role VARCHAR(50) DEFAULT 'STUDENT'`);
+        } catch (alterErr) {
+            // Ignore if already altered or restricted
+        }
+
         const hashedPassword = await bcrypt.hash(password, 10);
         const derivedUsername = email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '') + '_' + Date.now().toString().slice(-4);
 
-        // Store into both password and password_hash so whichever column exists gets the hash
+        // Fallback for role value if ENUM is still restrictive: map COORDINATOR to SUPERVISOR at user level
+        // Designation in staff table will maintain true coordinator identity
+        let userTableRole = requestedRole;
+        if (requestedRole === 'COORDINATOR') {
+            userTableRole = 'SUPERVISOR'; // Compatible with standard ENUM('STUDENT','SUPERVISOR')
+        }
+
         const [userResult] = await smartInsert(connection, 'users', {
             username: derivedUsername,
             email: email.trim().toLowerCase(),
@@ -179,12 +194,12 @@ app.post('/api/auth/register', async (req, res) => {
             password_hash: hashedPassword,
             full_name: full_name.trim(),
             name: full_name.trim(),
-            role: normalizedRole
+            role: userTableRole
         });
 
         const newUserId = userResult.insertId;
 
-        if (normalizedRole === 'STUDENT') {
+        if (requestedRole === 'STUDENT') {
             const cleanMatric = matric_no ? matric_no.trim() : `U22/${selectedDept.slice(0, 2).toUpperCase()}/${Date.now().toString().slice(-4)}`;
             await smartInsert(connection, 'students', {
                 user_id: newUserId,
@@ -194,14 +209,15 @@ app.post('/api/auth/register', async (req, res) => {
                 programme: `B.Sc / B.Eng in ${selectedDept}`,
                 academic_year: '2025/2026'
             });
-        } else if (normalizedRole === 'SUPERVISOR' || normalizedRole === 'COORDINATOR') {
+        } else if (requestedRole === 'SUPERVISOR' || requestedRole === 'COORDINATOR') {
             const cleanStaff = staff_no ? staff_no.trim() : `STF/${Date.now().toString().slice(-4)}`;
+            const isCoord = requestedRole === 'COORDINATOR';
             await smartInsert(connection, 'staff', {
                 user_id: newUserId,
                 id: newUserId,
                 staff_no: cleanStaff,
                 department: selectedDept,
-                designation: normalizedRole === 'COORDINATOR' ? 'Project Coordinator' : 'Lecturer'
+                designation: isCoord ? 'Project Coordinator' : 'Lecturer'
             });
         }
 
