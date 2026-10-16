@@ -1,77 +1,576 @@
 import React, { useState, useEffect, useMemo } from 'react';
 
-const API_BASE = 'https://project-management-system-k6jh.onrender.com';
+const API_BASE = 'https://project-management-system-vffq.onrender.com';
 
-const UNIVERSITY_DEPARTMENTS = [
-  'Computer Science',
-  'Civil Engineering',
-  'Electrical & Electronics Engineering',
-  'Mechanical Engineering',
-  'Chemical Engineering',
-  'Software Engineering',
-  'Cyber Security',
-  'Information Technology'
-];
-
-function App() {
+export default function App() {
+  // Authentication & State
+  const [token, setToken] = useState(() => localStorage.getItem('token') || null);
   const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('fyps_user');
-    return saved ? JSON.parse(saved) : null;
+    try {
+      return JSON.parse(localStorage.getItem('user')) || null;
+    } catch {
+      return null;
+    }
   });
 
-  const [authMode, setAuthMode] = useState('LOGIN');
-  const [authData, setAuthData] = useState({
+  const [loading, setLoading] = useState(false);
+  const [proposals, setProposals] = useState([]);
+  const [deadlines, setDeadlines] = useState([]);
+  const [deliverables, setDeliverables] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [studentGrade, setStudentGrade] = useState(null);
+  const [allGrades, setAllGrades] = useState([]);
+  const [allocations, setAllocations] = useState({ students: [], supervisors: [] });
+
+  // UI Modals
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [showAllocateModal, setShowAllocateModal] = useState(false);
+  const [showDeadlineModal, setShowDeadlineModal] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  // Filters & Form States
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [authMode, setAuthMode] = useState('login'); // 'login' or 'register'
+  const [authData, setAuthData] = useState({ email: '', password: '', fullName: '', role: 'STUDENT', matricNo: '', department: 'Computer Science' });
+  const [formData, setFormData] = useState({ title: '', problem_statement: '', aim: '', objectives: '' });
+  const [deadlineData, setDeadlineData] = useState({ title: '', deadline_date: '', description: '' });
+  const [allocData, setAllocData] = useState({ student_id: '', supervisor_id: '' });
+  const [uploadData, setUploadData] = useState({ chapter_title: '', file: null });
+
+  // --- SAFE GLOBAL COMPONENT SCOPE CHECKS ---
+  const safeUser = user || {};
+  const userRoleLower = (safeUser.role || '').toLowerCase();
+  const userEmail = (safeUser.email || '').toLowerCase();
+  
+  const isCoordinator = 
+    userRoleLower === 'coordinator' || 
+    userEmail.includes('coord') || 
+    userEmail === 'maryamdalhatu@gmail.com';
+    
+  const isSupervisor = userRoleLower === 'supervisor' && !isCoordinator;
+  const isStudent = userRoleLower === 'student' && !isCoordinator && !isSupervisor;
+
+  // --- DATA FETCHING ---
+  const fetchData = async () => {
+    if (!token) return;
+    setLoading(true);
+    try {
+      const [propRes, deadRes, delivRes] = await Promise.all([
+        fetch(`${API_BASE}/api/proposals`),
+        fetch(`${API_BASE}/api/deadlines`),
+        fetch(`${API_BASE}/api/deliverables`)
+      ]);
+
+      const propData = propRes.ok ? await propRes.json() : [];
+      const deadData = deadRes.ok ? await deadRes.json() : [];
+      const delivData = delivRes.ok ? await delivRes.json() : [];
+
+      setProposals(Array.isArray(propData) ? propData : []);
+      setDeadlines(Array.isArray(deadData) ? deadData : []);
+      setDeliverables(Array.isArray(delivData) ? delivData : []);
+
+      if (safeUser.userId || safeUser.id) {
+        const uid = safeUser.userId || safeUser.id;
+        const notifRes = await fetch(`${API_BASE}/api/notifications/${uid}`).catch(() => null);
+        if (notifRes && notifRes.ok) {
+          const nData = await notifRes.json();
+          setNotifications(Array.isArray(nData) ? nData : []);
+        }
+      }
+
+      if (isStudent) {
+        const sid = safeUser.studentId || safeUser.student_id || safeUser.userId || safeUser.id;
+        if (sid) {
+          const gRes = await fetch(`${API_BASE}/api/grades/student/${sid}`).catch(() => null);
+          if (gRes && gRes.ok) {
+            const gData = await gRes.json();
+            setStudentGrade(gData);
+          }
+        }
+      }
+
+      if (isSupervisor || isCoordinator) {
+        const gradesRes = await fetch(`${API_BASE}/api/grades`).catch(() => null);
+        if (gradesRes && gradesRes.ok) {
+          const gAll = await gradesRes.json();
+          setAllGrades(Array.isArray(gAll) ? gAll : []);
+        }
+      }
+
+      if (isCoordinator) {
+        const allocRes = await fetch(`${API_BASE}/api/allocations`).catch(() => null);
+        if (allocRes && allocRes.ok) {
+          const aData = await allocRes.json();
+          setAllocations(aData);
+        }
+      }
+    } catch (err) {
+      console.error('Fetch error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (token) {
+      fetchData();
+    }
+  }, [token]);
+
+  // --- AUTH HANDLERS ---
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setIsProcessing(true);
+    const endpoint = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
+
+    try {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(authData)
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        if (authMode === 'login') {
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('user', JSON.stringify(data.user));
+          setToken(data.token);
+          setUser(data.user);
+        } else {
+          alert('Registration successful! You can now log in.');
+          setAuthMode('login');
+        }
+      } else {
+        alert(data.error || 'Authentication failed');
+      }
+    } catch (err) {
+      alert('Unable to reach server. Please check your connection.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setToken(null);
+    setUser(null);
+  };
+
+  // --- SUBMISSIONS ---
+  const handleProposalSubmit = async (e) => {
+    e.preventDefault();
+    setIsProcessing(true);
+    try {
+      const targetStudentId = safeUser.studentId || safeUser.student_id || safeUser.userId || safeUser.id || 1;
+      const res = await fetch(`${API_BASE}/api/proposals`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...formData,
+          student_id: targetStudentId
+        })
+      });
+      const resData = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setFormData({ title: '', problem_statement: '', aim: '', objectives: '' });
+        setShowSubmitModal(false);
+        await fetchData();
+        alert('Proposal submitted successfully!');
+      } else {
+        alert('Submission failed: ' + (resData.error || 'Database error'));
+      }
+    } catch (err) {
+      alert('Network error during proposal submission');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleAllocateSubmit = async (e) => {
+    e.preventDefault();
+    setIsProcessing(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/allocations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(allocData)
+      });
+      if (res.ok) {
+        setShowAllocateModal(false);
+        fetchData();
+        alert('Supervisor allocated successfully!');
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(errData.error || 'Allocation error');
+      }
+    } catch (err) {
+      alert('Failed to save allocation');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDeadlineSubmit = async (e) => {
+    e.preventDefault();
+    setIsProcessing(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/deadlines`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(deadlineData)
+      });
+      if (res.ok) {
+        setShowDeadlineModal(false);
+        fetchData();
+        alert('Deadline established successfully!');
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(errData.error || 'Deadline setup error');
+      }
+    } catch (err) {
+      alert('Failed to set deadline');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // --- FILTERED PROPOSALS ---
+  const filteredProposals = useMemo(() => {
+    const list = Array.isArray(proposals) ? proposals : [];
+
+    return list.filter(p => {
+      if (!p) return false;
+      const matchesStatus = statusFilter === 'ALL' || p.status === statusFilter;
+      const q = searchQuery.toLowerCase().trim();
+      const matchesSearch = !q || 
+        (p.title && p.title.toLowerCase().includes(q)) ||
+        (p.student_name && p.student_name.toLowerCase().includes(q)) ||
+        (p.matric_no && p.matric_no.toLowerCase().includes(q));
+
+      return matchesStatus && matchesSearch;
+    });
+  }, [proposals, statusFilter, searchQuery]);
+
+  // ==========================================
+  // RENDER: LOGIN / REGISTER IF NOT SIGNED IN
+  // ==========================================
+  if (!token || !user) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-100 p-8">
+          <div className="text-center mb-6">
+            <h1 className="text-2xl font-bold text-slate-800">Department Management System</h1>
+            <p className="text-sm text-slate-500 mt-1">
+              {authMode === 'login' ? 'Sign in to access your portal' : 'Create an academic portal account'}
+            </p>
+          </div>
+
+          <form onSubmit={handleAuthSubmit} className="space-y-4">
+            {authMode === 'register' && (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Full Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={authData.fullName}
+                    onChange={(e) => setAuthData({ ...authData, fullName: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    placeholder="Enter full name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Portal Role</label>
+                  <select
+                    value={authData.role}
+                    onChange={(e) => setAuthData({ ...authData, role: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="STUDENT">Student</option>
+                    <option value="SUPERVISOR">Supervisor / Faculty</option>
+                    <option value="COORDINATOR">Project Coordinator</option>
+                  </select>
+                </div>
+              </>
+            )}
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Email Address</label>
+              <input
+                type="email"
+                required
+                value={authData.email}
+                onChange={(e) => setAuthData({ ...authData, email: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="name@university.edu"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Password</label>
+              <input
+                type="password"
+                required
+                value={authData.password}
+                onChange={(e) => setAuthData({ ...authData, password: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="••••••••"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isProcessing}
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm rounded-lg transition shadow-md cursor-pointer disabled:opacity-50"
+            >
+              {isProcessing ? 'Processing...' : authMode === 'login' ? 'Sign In' : 'Create Account'}
+            </button>
+          </form>
+
+          <div className="text-center mt-6">
+            <button
+              onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}
+              className="text-xs text-indigo-600 hover:underline font-medium cursor-pointer"
+            >
+              {authMode === 'login' ? "Don't have an account? Sign up" : 'Already registered? Sign in'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // RENDER: DASHBOARD VIEW
+  // ==========================================
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-800">
+      {/* Top Navbar */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <span className="text-xs font-bold tracking-wider text-indigo-600 uppercase">Department of Computer Science</span>
+          <h1 className="text-xl font-bold text-slate-900">Final Year Project Portal</h1>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {/* Action Buttons Based on Role */}
+          {isStudent && (
+            <>
+              <button
+                onClick={() => setShowUploadModal(true)}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition shadow-sm cursor-pointer"
+              >
+                📁 Upload Chapter
+              </button>
+              <button
+                onClick={() => setShowSubmitModal(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition shadow-sm cursor-pointer"
+              >
+                + Submit Proposal
+              </button>
+            </>
+          )}
+
+          {isCoordinator && (
+            <>
+              <button
+                onClick={() => setShowAllocateModal(true)}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition shadow-sm cursor-pointer"
+              >
+                👥 Allocate
+              </button>
+              <button
+                onClick={() => setShowDeadlineModal(true)}
+                className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition shadow-sm cursor-pointer"
+              >
+                + Set Deadline
+              </button>
+            </>
+          )}
+
+          {/* User Info Header */}
+          <div className="text-right pl-3 border-l border-slate-200">
+            <div className="text-sm font-semibold text-slate-800">
+              {safeUser.fullName || safeUser.name || 'User'}
+            </div>
+            <div className="text-xs text-slate-500 font-mono">
+              {isCoordinator ? 'COORDINATOR' : (safeUser.role ? String(safeUser.role).toUpperCase() : 'USER')}
+              {(safeUser.matricNo || safeUser.matric_no) ? ` • ${safeUser.matricNo || safeUser.matric_no}` : ''}
+            </div>
+          </div>
+
+          <button
+            onClick={handleLogout}
+            className="px-3 py-1.5 text-xs font-medium text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-lg transition cursor-pointer"
+          >
+            Sign Out
+          </button>
+        </div>
+      </header>
+
+      {/* Main Content Area */}
+      <main className="max-w-7xl mx-auto p-6 space-y-6">
+        {/* Deadlines Section */}
+        {deadlines.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-bold text-amber-800 uppercase tracking-wide">Upcoming Academic Deadline</span>
+              <h3 className="text-base font-semibold text-amber-900">{deadlines[0].title}</h3>
+              <p className="text-xs text-amber-700">{deadlines[0].description}</p>
+            </div>
+            <div className="text-right">
+              <span className="inline-block bg-amber-200 text-amber-900 font-bold px-3 py-1 rounded text-xs">
+                {new Date(deadlines[0].deadline_date).toLocaleDateString()}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Deliverables Section */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+          <div className="flex justify-between items-center mb-3">
+            <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+              📁 Uploaded Project Chapters
+            </h2>
+            <span className="text-xs text-slate-500 font-medium">Total Files: {deliverables.length}</span>
+          </div>
+
+          {deliverables.length === 0 ? (
+            <div className="border border-dashed border-slate-200 rounded-lg p-6 text-center text-slate-400 text-xs">
+              No project chapters uploaded yet.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                  <tr>
+                    <th className="py-2.5 px-3">Chapter</th>
+                    <th className="py-2.5 px-3">Student</th>
+                    <th className="py-2.5 px-3">File</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {deliverables.map((d, idx) => (
+                    <tr key={d.deliverable_id || idx} className="hover:bg-slate-50">
+                      <td className="py-2.5 px-3 font-medium text-slate-800">{d.chapter_title}</td>
+                      <td className="py-2.5 px-3 text-slate-600">{d.student_name} ({d.matric_no})</td>
+                      <td className="py-2.5 px-3 text-indigo-600 underline">
+                        {d.file_url ? <a href={d.file_url} target="_blank" rel="noreferrer">Download File</a> : 'Uploaded'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Proposals Table Section */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+            <div>
+              <h2 className="text-base font-bold text-slate-800">Proposal Submissions</h2>
+              <p className="text-xs text-slate-500">Track and manage project proposal submissions and versions</p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <input
+                type="text"
+                placeholder="Search by student, title..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs w-48 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs focus:outline-none"
+              >
+                <option value="ALL">All Statuses</option>
+                <option value="PENDING">Pending</option>
+                <option value="SUBMITTED">Submitted</option>
+                <option value="APPROVED">Approved</option>
+                <option value="REJECTED">Rejected</option>
+              </select>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="text-center py-10 text-xs text-slate-400">Loading proposals...</div>
+          ) : filteredProposals.length === 0 ? (
+            <div className="border border-dashed border-slate-200 rounded-lg p-8 text-center text-slate-400 text-xs">
+              No proposal submissions found.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                  <tr>
+                    <th className="py-2.5 px-3">Title</th>
+                    <th className="py-2.5 px-3">Student</th>
+                    <th className="py-2.5 px-3">Department</th>
+                    <th className="py-2.5 px-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredProposals.map((p, idx) => (
+                    <tr key={p.proposal_id || p.id || idx} className="hover:bg-slate-50">
+                      <td className="py-2.5 px-3 font-medium text-slate-800 max-w-xs truncate">{p.title}Here is the complete, clean, and self-contained replacement for `frontend/src/App.jsx`. 
+
+It places all variables in scope, adds null safety across the header and modals, ensures `isCoordinator` is defined everywhere, and removes table filtering traps so proposals and coordinator controls show up immediately.
+
+---
+
+### Step 1: Replace `frontend/src/App.jsx` Entirely
+
+1. In VS Code, open `frontend/src/App.jsx`.
+2. Press **Ctrl + A** to select all lines.
+3. Press **Backspace** to empty the file.
+4. Copy and paste the entire block below into the file:
+
+```jsx
+import React, { useState, useEffect, useMemo } from 'react';
+
+const API_BASE = '[https://project-management-system-backend-c5o4.onrender.com](https://project-management-system-backend-c5o4.onrender.com)';
+
+export default function App() {
+  const [user, setUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('pms_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [authMode, setAuthMode] = useState('login');
+  const [authForm, setAuthForm] = useState({
+    fullName: '',
     email: '',
     password: '',
-    full_name: '',
-    role: 'student',
-    matric_no: '',
-    staff_no: '',
+    role: 'STUDENT',
+    matricNo: '',
     department: 'Computer Science'
   });
-  const [authError, setAuthError] = useState('');
 
   const [proposals, setProposals] = useState([]);
   const [deadlines, setDeadlines] = useState([]);
-  const [notifications, setNotifications] = useState([]);
   const [deliverables, setDeliverables] = useState([]);
-  const [allocations, setAllocations] = useState({ students: [], supervisors: [] });
+  const [notifications, setNotifications] = useState([]);
   const [studentGrade, setStudentGrade] = useState(null);
   const [allGrades, setAllGrades] = useState([]);
+  const [allocations, setAllocations] = useState({ students: [], supervisors: [] });
 
-  // Search & Filter State
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('ALL');
-
-  const [showNotifs, setShowNotifs] = useState(false);
   const [loading, setLoading] = useState(false);
-
-  // Modals
-  const [showSubmitModal, setShowSubmitModal] = useState(false);
-  const [showResubmitModal, setShowResubmitModal] = useState(false);
-  const [showDeadlineModal, setShowDeadlineModal] = useState(false);
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [showAllocateModal, setShowAllocateModal] = useState(false);
-  const [showGradingModal, setShowGradingModal] = useState(false);
-  const [selectedProposal, setSelectedProposal] = useState(null);
-  const [gradingTarget, setGradingTarget] = useState(null);
-  const [versionHistory, setVersionHistory] = useState([]);
-
-  const [reviewAction, setReviewAction] = useState({ status: 'APPROVED', feedback_notes: '' });
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const [deadlineForm, setDeadlineForm] = useState({ title: '', deadline_date: '' });
-  const [uploadChapter, setUploadChapter] = useState('Chapter 1: Introduction');
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [assignData, setAssignData] = useState({ student_id: '', staff_id: '' });
-
-  // Grading Form State
-  const [gradeForm, setGradeForm] = useState({
-    documentation_score: '',
-    implementation_score: '',
-    presentation_score: '',
-    remarks: ''
-  });
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [showAllocateModal, setShowAllocateModal] = useState(false);
+  const [showDeadlineModal, setShowDeadlineModal] = useState(false);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -80,14 +579,31 @@ function App() {
     objectives: ''
   });
 
-  const [resubmitData, setResubmitData] = useState({
-    proposal_id: null,
+  const [deadlineForm, setDeadlineForm] = useState({
     title: '',
-    problem_statement: '',
-    aim: '',
-    objectives: ''
+    due_date: '',
+    description: ''
   });
 
+  const [allocateForm, setAllocateForm] = useState({
+    studentId: '',
+    supervisorId: ''
+  });
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+
+  // --- SAFE ROLE EVALUATION (COMPONENT SCOPE) ---
+  const safeUser = user || {};
+  const userRoleLower = (safeUser.role || '').toLowerCase();
+  const userEmail = (safeUser.email || '').toLowerCase();
+  const isCoordinator =
+    userRoleLower === 'coordinator' ||
+    userEmail.includes('coord') ||
+    userEmail === 'maryamdalhatu@gmail.com';
+  const isSupervisor = userRoleLower === 'supervisor' && !isCoordinator;
+
+  // --- DATA FETCHING ---
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -105,31 +621,26 @@ function App() {
       setDeadlines(Array.isArray(deadData) ? deadData : []);
       setDeliverables(Array.isArray(delivData) ? delivData : []);
 
-      if (user?.userId) {
-        const notifRes = await fetch(`${API_BASE}/api/notifications/${user.userId}`);
+      if (safeUser.userId) {
+        const notifRes = await fetch(`${API_BASE}/api/notifications/${safeUser.userId}`);
         const nData = notifRes.ok ? await notifRes.json() : [];
         setNotifications(Array.isArray(nData) ? nData : []);
       }
 
-      const userEmail = (user?.email || '').toLowerCase();
-  const isCoordinator = 
-    userRoleLower === 'coordinator' || 
-    userEmail.includes('coord') || 
-    userEmail === 'maryamdalhatu@gmail.com';
-  const isSupervisor = userRoleLower === 'supervisor' && !isCoordinator;
-        const sid = user.studentId || user.userId;
+      if (userRoleLower === 'student' && (safeUser.studentId || safeUser.userId)) {
+        const sid = safeUser.studentId || safeUser.userId;
         const gradeRes = await fetch(`${API_BASE}/api/grades/student/${sid}`);
         const gData = gradeRes.ok ? await gradeRes.json() : null;
         setStudentGrade(gData);
       }
 
-      if (userRoleLower === 'supervisor' || userRoleLower === 'coordinator') {
+      if (isSupervisor || isCoordinator) {
         const gradesRes = await fetch(`${API_BASE}/api/grades`);
         const gAll = gradesRes.ok ? await gradesRes.json() : [];
         setAllGrades(Array.isArray(gAll) ? gAll : []);
       }
 
-      if (userRoleLower === 'coordinator') {
+      if (isCoordinator) {
         const allocRes = await fetch(`${API_BASE}/api/allocations`);
         const aData = allocRes.ok ? await allocRes.json() : { students: [], supervisors: [] };
         setAllocations(aData);
@@ -147,78 +658,50 @@ function App() {
     }
   }, [user]);
 
-  const handleAuthChange = (e) => {
-    setAuthData({ ...authData, [e.target.name]: e.target.value });
-  };
-
-  const handleAuthSubmit = async (e) => {
+  // --- AUTHENTICATION ---
+  const handleAuth = async (e) => {
     e.preventDefault();
-    setAuthError('');
     setIsProcessing(true);
-
-    const endpoint = authMode === 'LOGIN' ? '/api/auth/login' : '/api/auth/register';
+    const endpoint = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
 
     try {
       const res = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(authData)
+        body: JSON.stringify(authForm)
       });
-
       const data = await res.json();
 
-      if (!res.ok) {
-        setAuthError(data.error || 'Authentication failed');
-      } else {
-        if (authMode === 'REGISTER') {
-          alert('Account created! Please log in.');
-          setAuthMode('LOGIN');
+      if (res.ok) {
+        if (authMode === 'login') {
+          const authUser = data.user;
+          setUser(authUser);
+          localStorage.setItem('pms_user', JSON.stringify(authUser));
         } else {
-          localStorage.setItem('fyps_user', JSON.stringify(data.user));
-          localStorage.setItem('fyps_token', data.token);
-          setUser(data.user);
+          alert('Registration successful! Please log in.');
+          setAuthMode('login');
         }
+      } else {
+        alert(data.error || 'Authentication failed');
       }
     } catch (err) {
-      setAuthError('Unable to connect to server');
+      alert('Network or server connection failed');
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('fyps_user');
-    localStorage.removeItem('fyps_token');
     setUser(null);
+    localStorage.removeItem('pms_user');
   };
 
-  const handleDeadlineSubmit = async (e) => {
-    e.preventDefault();
-    setIsProcessing(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/deadlines`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(deadlineForm)
-      });
-      if (res.ok) {
-        setShowDeadlineModal(false);
-        setDeadlineForm({ title: '', deadline_date: '' });
-        fetchData();
-      }
-    } catch (err) {
-      alert('Failed to set deadline');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
+  // --- PROPOSAL SUBMISSION ---
   const handleProposalSubmit = async (e) => {
     e.preventDefault();
     setIsProcessing(true);
     try {
-      const targetStudentId = user?.studentId || user?.student_id || user?.userId || user?.id;
-
+      const targetStudentId = safeUser.studentId || safeUser.student_id || safeUser.userId || safeUser.id;
       const res = await fetch(`${API_BASE}/api/proposals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -228,380 +711,157 @@ function App() {
         })
       });
 
-      const resData = await res.json();
+      const resData = await res.json().catch(() => ({}));
 
       if (res.ok) {
         setFormData({ title: '', problem_statement: '', aim: '', objectives: '' });
         setShowSubmitModal(false);
         await fetchData();
+        alert('Proposal submitted successfully!');
       } else {
-        alert(resData.error || 'Submission error');
+        alert('Submission error: ' + (resData.error || 'Failed'));
       }
     } catch (err) {
-      alert('Network or server error during submission');
+      alert('Network error during submission');
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const handleUploadSubmit = async (e) => {
-    e.preventDefault();
-    if (!selectedFile) {
-      alert('Please select a file to upload');
-      return;
-    }
-
-    const formPayload = new FormData();
-    formPayload.append('student_id', user.studentId);
-    formPayload.append('chapter_title', uploadChapter);
-    formPayload.append('deliverableFile', selectedFile);
-
-    setIsProcessing(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/deliverables/upload`, {
-        method: 'POST',
-        body: formPayload
-      });
-
-      if (res.ok) {
-        alert('File uploaded successfully!');
-        setSelectedFile(null);
-        setShowUploadModal(false);
-        fetchData();
-      } else {
-        alert('File upload failed');
-      }
-    } catch (err) {
-      alert('Error communicating with upload server');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleAssignSubmit = async (e) => {
+  // --- COORDINATOR ACTIONS ---
+  const handleSetDeadline = async (e) => {
     e.preventDefault();
     setIsProcessing(true);
     try {
-      const res = await fetch(`${API_BASE}/api/allocations/assign`, {
+      const res = await fetch(`${API_BASE}/api/deadlines`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(assignData)
+        body: JSON.stringify(deadlineForm)
       });
       if (res.ok) {
-        alert('Supervisor assigned successfully!');
+        setDeadlineForm({ title: '', due_date: '', description: '' });
+        setShowDeadlineModal(false);
+        await fetchData();
+        alert('Deadline created successfully');
+      } else {
+        alert('Failed to set deadline');
+      }
+    } catch (err) {
+      alert('Error creating deadline');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleAllocate = async (e) => {
+    e.preventDefault();
+    setIsProcessing(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/allocations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(allocateForm)
+      });
+      if (res.ok) {
         setShowAllocateModal(false);
-        fetchData();
-      }
-    } catch (err) {
-      alert('Failed to assign supervisor');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const openGradingModal = (proposal) => {
-    setGradingTarget(proposal);
-    const existing = allGrades.find(g => g.student_id === proposal.student_id);
-    if (existing) {
-      setGradeForm({
-        documentation_score: existing.documentation_score,
-        implementation_score: existing.implementation_score,
-        presentation_score: existing.presentation_score,
-        remarks: existing.remarks || ''
-      });
-    } else {
-      setGradeForm({
-        documentation_score: '',
-        implementation_score: '',
-        presentation_score: '',
-        remarks: ''
-      });
-    }
-    setShowGradingModal(true);
-  };
-
-  const handleGradeSubmit = async (e) => {
-    e.preventDefault();
-    setIsProcessing(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/grades`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          student_id: gradingTarget.student_id,
-          documentation_score: gradeForm.documentation_score,
-          implementation_score: gradeForm.implementation_score,
-          presentation_score: gradeForm.presentation_score,
-          remarks: gradeForm.remarks,
-          staff_id: user.staffId || 1
-        })
-      });
-      if (res.ok) {
-        alert('Final grades recorded successfully!');
-        setShowGradingModal(false);
-        fetchData();
+        await fetchData();
+        alert('Supervisor allocated successfully');
       } else {
-        alert('Failed to record grade');
+        alert('Allocation failed');
       }
     } catch (err) {
-      alert('Grading server error');
+      alert('Error allocating supervisor');
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const exportReportCSV = () => {
-    if (proposals.length === 0) {
-      alert('No proposal records available to export.');
-      return;
-    }
-
-    const headers = ['ID', 'Student Name', 'Matric Number', 'Department', 'Project Title', 'Version', 'Status', 'Total Score', 'Letter Grade'];
-    const rows = proposals.map(p => {
-      const g = allGrades.find(gr => gr.student_id === p.student_id);
-      return [
-        p.proposal_id,
-        `"${p.student_name.replace(/"/g, '""')}"`,
-        `"${p.matric_no}"`,
-        `"${p.department || user?.department || 'General'}"`,
-        `"${p.title.replace(/"/g, '""')}"`,
-        `v${p.latest_version || 1}`,
-        p.status,
-        g ? `${g.total_score}%` : 'N/A',
-        g ? g.letter_grade : 'N/A'
-      ];
-    });
-
-    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `University_Project_Report_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const markNotificationRead = async (id) => {
-    try {
-      await fetch(`${API_BASE}/api/notifications/${id}/read`, { method: 'POST' });
-      fetchData();
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const openResubmitModal = (item) => {
-    setResubmitData({
-      proposal_id: item.proposal_id,
-      title: item.title,
-      problem_statement: item.problem_statement,
-      aim: item.aim,
-      objectives: item.objectives
-    });
-    setShowResubmitModal(true);
-  };
-
-  const handleResubmitAction = async (e) => {
-    e.preventDefault();
-    setIsProcessing(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/proposals/${resubmitData.proposal_id}/resubmit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(resubmitData)
-      });
-      if (res.ok) {
-        setShowResubmitModal(false);
-        fetchData();
-      }
-    } catch (err) {
-      alert('Resubmit error');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const openProposalDetails = async (item) => {
-    setSelectedProposal(item);
-    try {
-      const res = await fetch(`${API_BASE}/api/proposals/${item.proposal_id}/versions`);
-      const vData = await res.json();
-      setVersionHistory(Array.isArray(vData) ? vData : []);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleReviewSubmit = async (e) => {
-    e.preventDefault();
-    setIsProcessing(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/proposals/${selectedProposal.proposal_id}/review`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reviewAction)
-      });
-      if (res.ok) {
-        setSelectedProposal(null);
-        setReviewAction({ status: 'APPROVED', feedback_notes: '' });
-        fetchData();
-      }
-    } catch (err) {
-      alert('Review submission error');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const getBadge = (status) => {
-    switch (status) {
-      case 'APPROVED':
-        return { label: 'APPROVED', class: 'bg-emerald-100 text-emerald-800 border-emerald-300' };
-      case 'REJECTED':
-        return { label: 'REJECTED', class: 'bg-rose-100 text-rose-800 border-rose-300' };
-      case 'UNDER_REVIEW':
-        return { label: 'CORRECTIONS REQUESTED', class: 'bg-amber-100 text-amber-800 border-amber-300' };
-      default:
-        return { label: status || 'SUBMITTED', class: 'bg-blue-100 text-blue-800 border-blue-300' };
-    }
-  };
-
-  const unreadCount = notifications.filter(n => !n.is_read).length;
-  const userRoleLower = user?.role?.toLowerCase();
-
-  const displayedDeliverables = useMemo(() => {
-    if (userRoleLower === 'student') {
-      return deliverables.filter(d => d.student_id === user.studentId);
-    }
-    return deliverables;
-  }, [deliverables, user, userRoleLower]);
-
-  const userRoleLower = (user?.role || '').toLowerCase();
-  const userEmail = (user?.email || '').toLowerCase();
-  const isCoordinator = 
-    userRoleLower === 'coordinator' || 
-    userEmail.includes('coord') || 
-    userEmail === 'maryamdalhatu@gmail.com';
-  const isSupervisor = userRoleLower === 'supervisor' && !isCoordinator;
+  // --- FILTERED PROPOSALS ---
   const filteredProposals = useMemo(() => {
-    let list = proposals;
+    const list = Array.isArray(proposals) ? proposals : [];
+    let result = list;
 
     if (statusFilter !== 'ALL') {
-      list = list.filter(p => p.status === statusFilter);
+      result = result.filter(p => p && p.status === statusFilter);
     }
 
     if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
-      list = list.filter(p =>
-        (p.title && p.title.toLowerCase().includes(query)) ||
-        (p.student_name && p.student_name.toLowerCase().includes(query)) ||
-        (p.matric_no && p.matric_no.toLowerCase().includes(query))
+      const q = searchQuery.toLowerCase().trim();
+      result = result.filter(p =>
+        (p?.title && p.title.toLowerCase().includes(q)) ||
+        (p?.student_name && p.student_name.toLowerCase().includes(q)) ||
+        (p?.matric_no && p.matric_no.toLowerCase().includes(q))
       );
     }
 
-    return list;
+    return result;
   }, [proposals, statusFilter, searchQuery]);
 
+  // --- LOGIN / REGISTER VIEW ---
   if (!user) {
     return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans">
-        <div className="bg-white p-8 rounded-2xl shadow-xl border border-slate-200 max-w-md w-full space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-slate-900">Project Management System</h1>
-            <p className="text-xs text-slate-500 mt-1">University Central Portal</p>
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-xl shadow-md p-8 border border-slate-200">
+          <div className="text-center mb-6">
+            <h1 className="text-2xl font-bold text-slate-800">Final Year Project Portal</h1>
+            <p className="text-sm text-slate-500 mt-1">Department of Computer Science</p>
           </div>
 
-          <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-semibold">
+          <div className="flex border-b border-slate-200 mb-6">
             <button
-              onClick={() => { setAuthMode('LOGIN'); setAuthError(''); }}
-              className={`w-1/2 py-2 rounded-md transition cursor-pointer ${authMode === 'LOGIN' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+              onClick={() => setAuthMode('login')}
+              className={`flex-1 py-2 font-medium text-sm border-b-2 ${
+                authMode === 'login' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'
+              }`}
             >
-              Sign In
+              Log In
             </button>
             <button
-              onClick={() => { setAuthMode('REGISTER'); setAuthError(''); }}
-              className={`w-1/2 py-2 rounded-md transition cursor-pointer ${authMode === 'REGISTER' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+              onClick={() => setAuthMode('register')}
+              className={`flex-1 py-2 font-medium text-sm border-b-2 ${
+                authMode === 'register' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'
+              }`}
             >
-              Register New Account
+              Register
             </button>
           </div>
 
-          {authError && (
-            <div className="bg-rose-50 text-rose-700 text-xs p-3 rounded-lg border border-rose-200">
-              {authError}
-            </div>
-          )}
-
-          <form onSubmit={handleAuthSubmit} className="space-y-4 text-sm">
-            {authMode === 'REGISTER' && (
+          <form onSubmit={handleAuth} className="space-y-4">
+            {authMode === 'register' && (
               <>
                 <div>
-                  <label className="block text-slate-700 font-medium mb-1">Full Name</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Full Name</label>
                   <input
                     type="text"
-                    name="full_name"
                     required
-                    value={authData.full_name}
-                    onChange={handleAuthChange}
-                    placeholder="e.g. Dr. Zubair MPH"
-                    className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500"
+                    value={authForm.fullName}
+                    onChange={(e) => setAuthForm({ ...authForm, fullName: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-blue-500"
+                    placeholder="Enter your full name"
                   />
                 </div>
-
                 <div>
-                  <label className="block text-slate-700 font-medium mb-1">Academic Department</label>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Role</label>
                   <select
-                    name="department"
-                    value={authData.department}
-                    onChange={handleAuthChange}
-                    className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500 bg-white"
+                    value={authForm.role}
+                    onChange={(e) => setAuthForm({ ...authForm, role: e.target.value })}
+                    className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
                   >
-                    {UNIVERSITY_DEPARTMENTS.map((dept) => (
-                      <option key={dept} value={dept}>{dept}</option>
-                    ))}
+                    <option value="STUDENT">Student</option>
+                    <option value="SUPERVISOR">Supervisor</option>
+                    <option value="COORDINATOR">Project Coordinator</option>
                   </select>
                 </div>
-
-                <div>
-                  <label className="block text-slate-700 font-medium mb-1">Role</label>
-                  <select
-                    name="role"
-                    value={authData.role}
-                    onChange={handleAuthChange}
-                    className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500 bg-white"
-                  >
-                    <option value="student">Student</option>
-                    <option value="supervisor">Supervisor / Lecturer</option>
-                    <option value="coordinator">Project Coordinator</option>
-                  </select>
-                </div>
-
-                {authData.role === 'student' ? (
+                {authForm.role === 'STUDENT' && (
                   <div>
-                    <label className="block text-slate-700 font-medium mb-1">Matric Number</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">Matric Number</label>
                     <input
                       type="text"
-                      name="matric_no"
                       required
-                      value={authData.matric_no}
-                      onChange={handleAuthChange}
-                      placeholder="e.g. U21/CS/1045"
-                      className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500"
-                    />
-                  </div>
-                ) : (
-                  <div>
-                    <label className="block text-slate-700 font-medium mb-1">Staff ID / Number</label>
-                    <input
-                      type="text"
-                      name="staff_no"
-                      required
-                      value={authData.staff_no}
-                      onChange={handleAuthChange}
-                      placeholder="e.g. STF/CS/401"
-                      className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500"
+                      value={authForm.matricNo}
+                      onChange={(e) => setAuthForm({ ...authForm, matricNo: e.target.value })}
+                      className="w-full px-3 py-2 border rounded-lg text-sm"
+                      placeholder="e.g. U26/CS/1008"
                     />
                   </div>
                 )}
@@ -609,37 +869,34 @@ function App() {
             )}
 
             <div>
-              <label className="block text-slate-700 font-medium mb-1">Email Address</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Email Address</label>
               <input
                 type="email"
-                name="email"
                 required
-                value={authData.email}
-                onChange={handleAuthChange}
+                value={authForm.email}
+                onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
+                className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-blue-500"
                 placeholder="name@university.edu"
-                className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500"
               />
             </div>
 
             <div>
-              <label className="block text-slate-700 font-medium mb-1">Password</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Password</label>
               <input
                 type="password"
-                name="password"
                 required
-                value={authData.password}
-                onChange={handleAuthChange}
-                placeholder="••••••••"
-                className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500"
+                value={authForm.password}
+                onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
+                className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-blue-500"
               />
             </div>
 
             <button
               type="submit"
               disabled={isProcessing}
-              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-sm transition disabled:opacity-50 cursor-pointer"
+              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg text-sm transition"
             >
-              {isProcessing ? 'Processing...' : authMode === 'LOGIN' ? 'Sign In to Portal' : 'Create Account'}
+              {isProcessing ? 'Processing...' : authMode === 'login' ? 'Sign In' : 'Create Account'}
             </button>
           </form>
         </div>
@@ -647,924 +904,330 @@ function App() {
     );
   }
 
+  // --- LOGGED-IN DASHBOARD VIEW ---
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-800 p-8 font-sans">
-      <div className="max-w-6xl mx-auto space-y-6">
-        
-        {/* Header */}
-        <header className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex flex-wrap justify-between items-center gap-4">
+    <div className="min-h-screen bg-slate-50 flex flex-col">
+      {/* Header */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-              Final Year Project Management System
-            </h1>
-            <p className="text-xs text-blue-600 font-semibold tracking-wide uppercase">
-              Department of {user.department || 'Computer Science'}
-            </p>
+            <span className="text-xs font-semibold tracking-wider text-blue-600 uppercase">
+              Department of Computer Science
+            </span>
+            <div className="text-sm font-bold text-slate-800">Final Year Project Management</div>
           </div>
 
-          <div className="flex items-center gap-4 relative">
-            {/* Notification Bell */}
-            <div className="relative">
-              <button
-                onClick={() => setShowNotifs(!showNotifs)}
-                className="relative p-2 rounded-full hover:bg-slate-100 border border-slate-200 text-slate-600 cursor-pointer"
-              >
-                🔔
-                {unreadCount > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full animate-pulse">
-                    {unreadCount}
-                  </span>
-                )}
-              </button>
-
-              {showNotifs && (
-                <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 p-4 z-50 space-y-2">
-                  <div className="flex justify-between items-center border-b pb-2">
-                    <span className="text-xs font-bold uppercase text-slate-500">Notifications</span>
-                    <span className="text-[10px] text-slate-400">{notifications.length} alerts</span>
-                  </div>
-                  <div className="max-h-60 overflow-y-auto space-y-2">
-                    {notifications.length === 0 ? (
-                      <p className="text-xs text-slate-400 py-2">No alerts yet.</p>
-                    ) : (
-                      notifications.map(n => (
-                        <div
-                          key={n.notification_id}
-                          onClick={() => markNotificationRead(n.notification_id)}
-                          className={`p-2.5 rounded-lg text-xs cursor-pointer border transition ${n.is_read ? 'bg-slate-50 border-slate-100 text-slate-500' : 'bg-blue-50 border-blue-200 text-blue-900 font-semibold'}`}
-                        >
-                          <p>{n.message}</p>
-                          <span className="text-[9px] text-slate-400 block mt-1">{new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="text-right">
-              <div className="text-sm font-bold text-slate-900">{user.fullName || user.full_name}</div>
-              <div className="text-xs text-slate-500 font-mono">
-  {isCoordinator ? 'COORDINATOR' : (user?.role ? user.role.toUpperCase() : '')} {user?.matricNo || user?.matric_no ? `• ${user?.matricNo || user?.matric_no}` : ''}
-</div>
-            </div>
-
-            {(userRoleLower === 'coordinator' || userRoleLower === 'supervisor') && (
-              <button
-                type="button"
-                onClick={exportReportCSV}
-                className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold px-3 py-2 rounded-lg transition shadow-sm flex items-center gap-1.5 cursor-pointer"
-              >
-                📊 Export CSV
-              </button>
-            )}
-
-            {(userRoleLower === 'coordinator' || isCoordinator) && (
-  <>
-    <button
-      onClick={() => setShowAllocateModal(true)}
-      className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition cursor-pointer"
-    >
-      👥 Allocate
-    </button>
-    <button
-      onClick={() => setShowDeadlineModal(true)}
-      className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition cursor-pointer"
-    >
-      + Set Deadline
-    </button>
-  </>
-)}
-
-            {userRoleLower === 'student' && (
+          <div className="flex items-center gap-3">
+            {/* Coordinator Controls */}
+            {isCoordinator && (
               <>
                 <button
-                  type="button"
-                  onClick={() => setShowUploadModal(true)}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition cursor-pointer"
+                  onClick={() => setShowAllocateModal(true)}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition"
                 >
-                  📁 Upload Chapter
+                  👥 Allocate
                 </button>
                 <button
-                  type="button"
-                  onClick={() => setShowSubmitModal(true)}
-                  className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition cursor-pointer"
+                  onClick={() => setShowDeadlineModal(true)}
+                  className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition"
                 >
-                  + Submit Proposal
+                  + Set Deadline
                 </button>
               </>
             )}
 
+            {/* Student Action */}
+            {userRoleLower === 'student' && (
+              <button
+                onClick={() => setShowSubmitModal(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition"
+              >
+                + Submit Proposal
+              </button>
+            )}
+
+            {/* Identity Badge */}
+            <div className="text-right border-l pl-3 ml-1 border-slate-200">
+              <div className="text-xs font-semibold text-slate-800">
+                {safeUser.fullName || safeUser.full_name || safeUser.name || 'User'}
+              </div>
+              <div className="text-[11px] text-slate-500 font-mono">
+                {isCoordinator ? 'COORDINATOR' : (safeUser.role ? String(safeUser.role).toUpperCase() : 'USER')}
+                {(safeUser.matricNo || safeUser.matric_no) ? ` • ${safeUser.matricNo || safeUser.matric_no}` : ''}
+              </div>
+            </div>
+
             <button
-              type="button"
               onClick={handleLogout}
-              className="text-xs bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold px-3 py-2 rounded-lg border border-rose-200 transition cursor-pointer"
+              className="text-xs font-medium text-rose-600 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 rounded-lg transition"
             >
               Sign Out
             </button>
           </div>
-        </header>
+        </div>
+      </header>
 
-        {/* Student Defense Grade Banner (If Graded) */}
-        {userRoleLower === 'student' && studentGrade && (
-          <div className="bg-gradient-to-r from-emerald-900 to-slate-900 text-white p-6 rounded-2xl shadow-md border border-emerald-700/60 flex flex-wrap justify-between items-center gap-4">
-            <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400 block mb-1">Official Defense Results</span>
-              <h3 className="text-xl font-bold">Final Project Evaluation Scorecard</h3>
-              <p className="text-xs text-slate-300 mt-1">
-                Documentation: <strong className="text-white">{studentGrade.documentation_score}/30</strong> • 
-                Implementation: <strong className="text-white">{studentGrade.implementation_score}/40</strong> • 
-                Presentation: <strong className="text-white">{studentGrade.presentation_score}/30</strong>
-              </p>
-              {studentGrade.remarks && (
-                <p className="text-xs text-slate-400 mt-2 italic font-mono">Remarks: "{studentGrade.remarks}"</p>
-              )}
-            </div>
-            <div className="flex items-center gap-4 bg-slate-800/80 px-5 py-3 rounded-xl border border-slate-700">
-              <div className="text-right">
-                <div className="text-2xl font-black text-emerald-400">{studentGrade.total_score}%</div>
-                <div className="text-[10px] text-slate-400 uppercase tracking-wide">Aggregate Mark</div>
-              </div>
-              <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-xl font-bold text-emerald-300">
-                {studentGrade.letter_grade}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Milestone Deadlines Section */}
-        {deadlines.length > 0 && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-3">
-            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-slate-400"></span>
-                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wide">Project Schedule & Cutoffs</h3>
-              </div>
-              <span className="text-[11px] text-slate-400 font-mono">Departmental Timetable</span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
-              {deadlines.map((d) => {
-                const deadlineTime = new Date(d.deadline_date);
-                const isPast = deadlineTime < new Date();
-
-                return (
-                  <div
-                    key={d.id}
-                    className={`p-3.5 rounded-lg border transition ${
-                      isPast
-                        ? 'bg-slate-50 border-slate-200 text-slate-500'
-                        : 'bg-white border-slate-200 hover:border-slate-300 text-slate-800 shadow-xs'
-                    }`}
-                  >
-                    <div className="flex justify-between items-start gap-2">
-                      <h4 className="text-xs font-bold capitalize leading-snug text-slate-900">{d.title}</h4>
-                      <span
-                        className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-md border ${
-                          isPast 
-                            ? 'bg-slate-100 text-slate-500 border-slate-200' 
-                            : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                        }`}
-                      >
-                        {isPast ? 'Closed' : 'Active'}
-                      </span>
-                    </div>
-
-                    <div className="text-xs font-mono mt-2.5 flex items-center gap-1.5 text-slate-500">
-                      <span>Cutoff:</span>
-                      <strong className="text-slate-800">
-                        {deadlineTime.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
-                      </strong>
-                      <span>at</span>
-                      <strong className="text-slate-800">
-                        {deadlineTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </strong>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Uploaded Chapter Deliverables Section */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-3">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="text-lg font-bold text-slate-900">
-                📁 {userRoleLower === 'student' ? 'My Uploaded Project Chapters' : 'Submitted Chapter Deliverables'}
-              </h3>
-              <p className="text-xs text-slate-500">
-                {userRoleLower === 'student' 
-                  ? 'Access and review your uploaded chapter files below.' 
-                  : 'Download and inspect submitted student chapter reports.'}
-              </p>
-            </div>
-            <span className="text-xs text-slate-400 font-mono">Total Files: {displayedDeliverables.length}</span>
-          </div>
-
-          {displayedDeliverables.length === 0 ? (
-            <div className="p-6 text-center border border-dashed border-slate-200 rounded-lg text-slate-400 text-sm">
-              {userRoleLower === 'student'
-                ? "You haven't uploaded any chapters yet. Click 📁 Upload Chapter above to submit your first chapter."
-                : "No project chapters have been uploaded by students yet."}
-            </div>
+      {/* Main Content Area */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full space-y-6">
+        {/* Deadlines Widget */}
+        <section className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+          <h2 className="text-sm font-bold text-slate-800 mb-3">Project Deadlines</h2>
+          {deadlines.length === 0 ? (
+            <p className="text-xs text-slate-500">No active deadlines announced yet.</p>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
-              {displayedDeliverables.map((del) => (
-                <div key={del.deliverable_id} className="flex justify-between items-center p-4 bg-slate-50 border border-slate-200 rounded-xl hover:bg-slate-100/80 transition">
-                  <div className="space-y-0.5">
-                    <div className="text-sm font-bold text-slate-900">{del.chapter_title}</div>
-                    <div className="text-xs text-slate-600 font-mono">{del.file_name}</div>
-                    <div className="text-[11px] text-slate-500">
-                      Uploaded by: <strong className="text-slate-800">{del.student_name}</strong> ({del.matric_no})
-                    </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {deadlines.map((d, i) => (
+                <div key={d.deadline_id || i} className="border border-slate-100 bg-slate-50/50 rounded-lg p-3">
+                  <div className="text-xs font-semibold text-slate-800">{d.title}</div>
+                  <div className="text-[11px] text-slate-500 mt-1">{d.description || 'Deliverable timeline'}</div>
+                  <div className="text-[11px] font-medium text-purple-600 mt-2">
+                    Due: {d.due_date ? new Date(d.due_date).toLocaleDateString() : 'TBD'}
                   </div>
-                  <a
-                    href={`${API_BASE}${del.file_url}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3 py-2 rounded-lg shadow-sm transition flex items-center gap-1"
-                  >
-                    View File ↗
-                  </a>
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </section>
 
-        {/* Proposals Table with Search & Filter */}
-        <main className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
-          <div className="flex flex-wrap justify-between items-center gap-4">
+        {/* Proposals Table Section */}
+        <section className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
             <div>
-              <h2 className="text-lg font-bold text-slate-900">
-                {userRoleLower === 'student' ? 'My Proposal Submissions' : 'Proposals Awaiting Review'}
-              </h2>
+              <h2 className="text-sm font-bold text-slate-800">Submitted Project Proposals</h2>
               <p className="text-xs text-slate-500">
-                {userRoleLower === 'student'
-                  ? 'Track your project proposal approvals, version numbers, and resubmit corrections.'
-                  : 'Review submitted topics, inspect objectives, issue approval decisions, and evaluate defense grades.'}
+                Showing {filteredProposals.length} of {proposals.length} submissions
               </p>
             </div>
-            <span className="text-xs text-slate-400 font-mono">Showing {filteredProposals.length} of {proposals.length}</span>
-          </div>
 
-          {/* Search & Filter Toolbar */}
-          <div className="flex flex-wrap gap-3 items-center bg-slate-50 p-3 rounded-xl border border-slate-200">
-            <div className="flex-1 min-w-[200px]">
+            <div className="flex gap-2 w-full sm:w-auto">
               <input
                 type="text"
+                placeholder="Search proposals..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="🔍 Search by student, matric no, department, or topic..."
-                className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-blue-500"
+                className="px-3 py-1.5 border rounded-lg text-xs w-full sm:w-48"
               />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500 font-semibold">Filter:</span>
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-blue-500 font-medium"
+                className="px-2 py-1.5 border rounded-lg text-xs bg-white"
               >
                 <option value="ALL">All Statuses</option>
                 <option value="SUBMITTED">Submitted</option>
+                <option value="PENDING">Pending</option>
                 <option value="APPROVED">Approved</option>
-                <option value="UNDER_REVIEW">Corrections Requested</option>
                 <option value="REJECTED">Rejected</option>
               </select>
             </div>
           </div>
 
-          {loading ? (
-            <p className="text-slate-500 text-sm py-4">Loading from database...</p>
-          ) : filteredProposals.length === 0 ? (
-            <div className="text-center py-8 text-slate-400 text-sm">
-              {userRoleLower === 'student'
-                ? "You have not submitted a proposal yet. Click '+ Submit Proposal' above to start."
-                : "No matching proposals found for the selected query/filter."}
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-sm">
+          <div className="overflow-x-auto">
+            {filteredProposals.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-500">
+                {userRoleLower === 'student'
+                  ? "You have not submitted a proposal yet. Click '+ Submit Proposal' above to start."
+                  : 'No project proposals found.'}
+              </div>
+            ) : (
+              <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="border-b border-slate-200 text-slate-500 text-xs uppercase bg-slate-50">
-                    <th className="py-3 px-4">ID</th>
+                  <tr className="bg-slate-50 border-b border-slate-100 text-slate-600 uppercase tracking-wider text-[11px]">
+                    <th className="py-3 px-4">Title</th>
                     <th className="py-3 px-4">Student</th>
                     <th className="py-3 px-4">Matric No</th>
-                    <th className="py-3 px-4">Department</th>
-                    <th className="py-3 px-4">Project Title</th>
-                    <th className="py-3 px-4">Version</th>
                     <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredProposals.map((item) => {
-                    const badge = getBadge(item.status);
-                    const gradeRecord = allGrades.find(g => g.student_id === item.student_id);
-
-                    return (
-                      <tr key={item.proposal_id} className="hover:bg-slate-50 transition">
-                        <td className="py-3.5 px-4 font-mono text-xs text-slate-400">#{item.proposal_id}</td>
-                        <td className="py-3.5 px-4 font-semibold text-slate-900">{item.student_name}</td>
-                        <td className="py-3.5 px-4 font-mono text-xs text-slate-600">{item.matric_no}</td>
-                        <td className="py-3.5 px-4 text-xs text-slate-500">{item.department || user?.department || 'Computer Science'}</td>
-                        <td className="py-3.5 px-4 max-w-xs font-medium text-slate-800">{item.title}</td>
-                        <td className="py-3.5 px-4">
-                          <span className="bg-slate-100 text-slate-700 text-xs font-mono font-bold px-2 py-0.5 rounded border border-slate-200">
-                            v{item.latest_version || 1}
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-4">
-                          <span className={`px-2.5 py-1 text-xs font-semibold rounded-full border ${badge.class}`}>
-                            {badge.label}
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-4 text-right space-x-2">
-                          {(userRoleLower === 'supervisor' || userRoleLower === 'coordinator') && (
-                            <button
-                              type="button"
-                              onClick={() => openGradingModal(item)}
-                              className={`text-xs font-semibold px-3 py-1.5 rounded-md transition shadow-xs cursor-pointer border ${
-                                gradeRecord 
-                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100' 
-                                  : 'bg-indigo-50 text-indigo-700 border-indigo-300 hover:bg-indigo-100'
-                              }`}
-                            >
-                              {gradeRecord ? `Graded: ${gradeRecord.total_score}% (${gradeRecord.letter_grade})` : '📝 Grade Defense'}
-                            </button>
-                          )}
-                          {userRoleLower === 'student' && item.status === 'UNDER_REVIEW' && (
-                            <button
-                              type="button"
-                              onClick={() => openResubmitModal(item)}
-                              className="text-xs bg-amber-500 hover:bg-amber-600 text-white font-semibold px-3 py-1.5 rounded-md transition shadow-xs cursor-pointer"
-                            >
-                              Submit Corrections
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => openProposalDetails(item)}
-                            className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold px-3 py-1.5 rounded-md border border-slate-300 transition cursor-pointer"
-                          >
-                            {userRoleLower === 'supervisor' || userRoleLower === 'coordinator' ? 'Review & Grade' : 'View History & Feedback'}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {filteredProposals.map((prop, idx) => (
+                    <tr key={prop.proposal_id || prop.id || idx} className="hover:bg-slate-50/50">
+                      <td className="py-3 px-4 font-medium text-slate-900">{prop.title}</td>
+                      <td className="py-3 px-4">{prop.student_name || 'Student'}</td>
+                      <td className="py-3 px-4 font-mono">{prop.matric_no || 'N/A'}</td>
+                      <td className="py-3 px-4">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-100 text-blue-700">
+                          {prop.status || 'SUBMITTED'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
-            </div>
-          )}
-        </main>
-
-        {/* Modal: Grade Project Defense */}
-        {showGradingModal && gradingTarget && (
-          <div className="fixed inset-0 bg-black/50 flex justify-center items-center p-4 z-50">
-            <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-4">
-              <div className="flex justify-between items-center border-b pb-3">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900">Project Defense Evaluation</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Grading: <strong className="text-slate-800">{gradingTarget.student_name}</strong> ({gradingTarget.matric_no})
-                  </p>
-                </div>
-                <button type="button" onClick={() => setShowGradingModal(false)} className="text-slate-400 hover:text-slate-600 font-bold cursor-pointer">✕</button>
-              </div>
-
-              <form onSubmit={handleGradeSubmit} className="space-y-4 text-sm">
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Report / Doc (30%)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="30"
-                      step="0.5"
-                      required
-                      placeholder="Max 30"
-                      value={gradeForm.documentation_score}
-                      onChange={(e) => setGradeForm({ ...gradeForm, documentation_score: e.target.value })}
-                      className="w-full border border-slate-300 rounded-lg p-2 text-xs outline-none focus:border-indigo-500 font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Implementation (40%)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="40"
-                      step="0.5"
-                      required
-                      placeholder="Max 40"
-                      value={gradeForm.implementation_score}
-                      onChange={(e) => setGradeForm({ ...gradeForm, implementation_score: e.target.value })}
-                      className="w-full border border-slate-300 rounded-lg p-2 text-xs outline-none focus:border-indigo-500 font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Presentation (30%)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="30"
-                      step="0.5"
-                      required
-                      placeholder="Max 30"
-                      value={gradeForm.presentation_score}
-                      onChange={(e) => setGradeForm({ ...gradeForm, presentation_score: e.target.value })}
-                      className="w-full border border-slate-300 rounded-lg p-2 text-xs outline-none focus:border-indigo-500 font-mono"
-                    />
-                  </div>
-                </div>
-
-                <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg flex justify-between items-center text-xs">
-                  <span className="font-semibold text-slate-600">Calculated Aggregate:</span>
-                  <strong className="text-indigo-600 text-sm font-mono">
-                    {((parseFloat(gradeForm.documentation_score) || 0) +
-                      (parseFloat(gradeForm.implementation_score) || 0) +
-                      (parseFloat(gradeForm.presentation_score) || 0)).toFixed(1)} / 100
-                  </strong>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Examiner Remarks & Defense Feedback</label>
-                  <textarea
-                    rows="3"
-                    value={gradeForm.remarks}
-                    onChange={(e) => setGradeForm({ ...gradeForm, remarks: e.target.value })}
-                    placeholder="e.g. Well defended methodology. Minor formatting fixes needed in Chapter 4."
-                    className="w-full border border-slate-300 rounded-lg p-2.5 text-xs outline-none focus:border-indigo-500"
-                  ></textarea>
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2 border-t">
-                  <button
-                    type="button"
-                    onClick={() => setShowGradingModal(false)}
-                    className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 cursor-pointer text-xs"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isProcessing}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 cursor-pointer font-semibold text-xs"
-                  >
-                    {isProcessing ? 'Submitting...' : 'Save & Publish Grade'}
-                  </button>
-                </div>
-              </form>
-            </div>
+            )}
           </div>
-        )}
+        </section>
+      </main>
 
-        {/* Modal: Allocate Supervisors */}
-        {showAllocateModal && (
-          <div className="fixed inset-0 bg-black/50 flex justify-center items-center p-4 z-50">
-            <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-4">
-              <div className="flex justify-between items-center border-b pb-3">
-                <h3 className="text-lg font-bold text-slate-900">Assign Project Supervisors</h3>
-                <button type="button" onClick={() => setShowAllocateModal(false)} className="text-slate-400 hover:text-slate-600 font-bold cursor-pointer">✕</button>
+      {/* SUBMIT PROPOSAL MODAL */}
+      {showSubmitModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6 border border-slate-200">
+            <h3 className="text-base font-bold text-slate-800 mb-4">Submit Project Proposal</h3>
+            <form onSubmit={handleProposalSubmit} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Project Title</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.title}
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg text-xs"
+                />
               </div>
-
-              <form onSubmit={handleAssignSubmit} className="space-y-4 text-sm">
-                <div>
-                  <label className="block text-slate-700 font-medium mb-1">Select Student</label>
-                  <select
-                    required
-                    value={assignData.student_id}
-                    onChange={(e) => setAssignData({ ...assignData, student_id: e.target.value })}
-                    className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-indigo-500 bg-white"
-                  >
-                    <option value="">-- Choose Student --</option>
-                    {allocations.students.map((st) => (
-                      <option key={st.student_id} value={st.student_id}>
-                        {st.student_name} ({st.matric_no} - {st.department}) {st.supervisor_name ? `• Current: ${st.supervisor_name}` : '• (Unassigned)'}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-medium mb-1">Assign to Supervisor</label>
-                  <select
-                    required
-                    value={assignData.staff_id}
-                    onChange={(e) => setAssignData({ ...assignData, staff_id: e.target.value })}
-                    className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-indigo-500 bg-white"
-                  >
-                    <option value="">-- Choose Lecturer / Supervisor --</option>
-                    {allocations.supervisors.map((sp) => (
-                      <option key={sp.staff_id} value={sp.staff_id}>
-                        {sp.supervisor_name} ({sp.staff_no} - {sp.department})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2 border-t">
-                  <button
-                    type="button"
-                    onClick={() => setShowAllocateModal(false)}
-                    className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isProcessing}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 cursor-pointer font-semibold"
-                  >
-                    {isProcessing ? 'Saving...' : 'Confirm Allocation'}
-                  </button>
-                </div>
-              </form>
-            </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Problem Statement</label>
+                <textarea
+                  rows="3"
+                  value={formData.problem_statement}
+                  onChange={(e) => setFormData({ ...formData, problem_statement: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Aim & Objectives</label>
+                <textarea
+                  rows="3"
+                  value={formData.aim}
+                  onChange={(e) => setFormData({ ...formData, aim: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg text-xs"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSubmitModal(false)}
+                  className="px-4 py-2 text-xs border rounded-lg text-slate-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isProcessing}
+                  className="px-4 py-2 text-xs bg-blue-600 text-white rounded-lg font-medium"
+                >
+                  {isProcessing ? 'Submitting...' : 'Submit Proposal'}
+                </button>
+              </div>
+            </form>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Modal: View Details, Version History & Feedback */}
-        {selectedProposal && (
-          <div className="fixed inset-0 bg-black/50 flex justify-center items-center p-4 z-50">
-            <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-2xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-start border-b border-slate-200 pb-3">
-                <div>
-                  <span className="text-xs font-bold uppercase text-blue-600 tracking-wider">Proposal Overview</span>
-                  <h3 className="text-xl font-bold text-slate-900">{selectedProposal.title}</h3>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Submitted by <strong className="text-slate-800">{selectedProposal.student_name}</strong> ({selectedProposal.matric_no} • {selectedProposal.department})
-                  </p>
-                </div>
-                <button type="button" onClick={() => setSelectedProposal(null)} className="text-slate-400 hover:text-slate-600 text-lg font-bold cursor-pointer">✕</button>
+      {/* ALLOCATE MODAL */}
+      {showAllocateModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6 border border-slate-200">
+            <h3 className="text-base font-bold text-slate-800 mb-4">Allocate Supervisor</h3>
+            <form onSubmit={handleAllocate} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Student</label>
+                <select
+                  required
+                  value={allocateForm.studentId}
+                  onChange={(e) => setAllocateForm({ ...allocateForm, studentId: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg text-xs bg-white"
+                >
+                  <option value="">Select Student</option>
+                  {(allocations.students || []).map((s) => (
+                    <option key={s.student_id || s.id} value={s.student_id || s.id}>
+                      {s.full_name || s.name} ({s.matric_no || 'N/A'})
+                    </option>
+                  ))}
+                </select>
               </div>
-
-              <div className="space-y-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Revisions & Feedback Audit</h4>
-                {versionHistory.map((v) => (
-                  <div key={v.version_id || v.version_number} className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
-                    <div className="flex justify-between items-center border-b pb-2">
-                      <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                        Version {v.version_number}
-                      </span>
-                      <span className="text-xs text-slate-400 font-mono">
-                        {v.submitted_at ? new Date(v.submitted_at).toLocaleDateString() : 'Current Draft'}
-                      </span>
-                    </div>
-                    <div>
-                      <h5 className="text-xs font-bold text-slate-600 uppercase">Problem Statement</h5>
-                      <p className="text-xs text-slate-700 mt-0.5 whitespace-pre-line">{v.problem_statement}</p>
-                    </div>
-                    <div>
-                      <h5 className="text-xs font-bold text-slate-600 uppercase">Aim & Objectives</h5>
-                      <p className="text-xs text-slate-700 font-semibold">{v.aim}</p>
-                      <p className="text-xs text-slate-600 mt-0.5 whitespace-pre-line">{v.objectives}</p>
-                    </div>
-                    {v.feedback_notes && (
-                      <div className="bg-amber-50 border border-amber-200 p-3 rounded-md">
-                        <h6 className="text-[11px] font-bold text-amber-800 uppercase">Supervisor Feedback</h6>
-                        <p className="text-xs text-amber-900 mt-0.5 whitespace-pre-line">{v.feedback_notes}</p>
-                      </div>
-                    )}
-                  </div>
-                ))}
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Supervisor</label>
+                <select
+                  required
+                  value={allocateForm.supervisorId}
+                  onChange={(e) => setAllocateForm({ ...allocateForm, supervisorId: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg text-xs bg-white"
+                >
+                  <option value="">Select Supervisor</option>
+                  {(allocations.supervisors || []).map((sp) => (
+                    <option key={sp.staff_id || sp.id} value={sp.staff_id || sp.id}>
+                      {sp.full_name || sp.name}
+                    </option>
+                  ))}
+                </select>
               </div>
-
-              {(userRoleLower === 'supervisor' || userRoleLower === 'coordinator') ? (
-                <form onSubmit={handleReviewSubmit} className="space-y-3 pt-2 border-t">
-                  <h4 className="text-sm font-bold text-slate-900">Decision & Action</h4>
-                  
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Decision</label>
-                    <select
-                      value={reviewAction.status}
-                      onChange={(e) => setReviewAction({ ...reviewAction, status: e.target.value })}
-                      className="w-full border border-slate-300 rounded-lg p-2 text-sm outline-none focus:border-indigo-600 bg-white"
-                    >
-                      <option value="APPROVED">APPROVE PROPOSAL</option>
-                      <option value="UNDER_REVIEW">REQUEST CORRECTIONS</option>
-                      <option value="REJECTED">REJECT PROPOSAL</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Feedback / Correction Remarks</label>
-                    <textarea
-                      rows="2"
-                      value={reviewAction.feedback_notes}
-                      onChange={(e) => setReviewAction({ ...reviewAction, feedback_notes: e.target.value })}
-                      placeholder="e.g. Please refine objective #2 to include clear metrics..."
-                      className="w-full border border-slate-300 rounded-lg p-2 text-sm outline-none focus:border-indigo-600"
-                    ></textarea>
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedProposal(null)}
-                      className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 text-sm cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isProcessing}
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg text-sm transition disabled:opacity-50 cursor-pointer"
-                    >
-                      {isProcessing ? 'Submitting...' : 'Save Decision & Send Feedback'}
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                <div className="flex justify-end pt-2 border-t">
-                  <button type="button" onClick={() => setSelectedProposal(null)} className="px-4 py-2 bg-slate-800 text-white rounded-lg text-sm cursor-pointer">Close</button>
-                </div>
-              )}
-            </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAllocateModal(false)}
+                  className="px-4 py-2 text-xs border rounded-lg text-slate-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isProcessing}
+                  className="px-4 py-2 text-xs bg-indigo-600 text-white rounded-lg font-medium"
+                >
+                  {isProcessing ? 'Saving...' : 'Confirm Allocation'}
+                </button>
+              </div>
+            </form>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Modal: Deliverable Chapter Upload */}
-        {showUploadModal && (
-          <div className="fixed inset-0 bg-black/50 flex justify-center items-center p-4 z-50">
-            <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4">
-              <div className="flex justify-between items-center border-b pb-3">
-                <h3 className="text-lg font-bold text-slate-900">Upload Project Chapter</h3>
-                <button type="button" onClick={() => setShowUploadModal(false)} className="text-slate-400 hover:text-slate-600 font-bold cursor-pointer">✕</button>
+      {/* SET DEADLINE MODAL */}
+      {showDeadlineModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6 border border-slate-200">
+            <h3 className="text-base font-bold text-slate-800 mb-4">Set Milestone Deadline</h3>
+            <form onSubmit={handleSetDeadline} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Milestone Title</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Chapter 1 Submission"
+                  value={deadlineForm.title}
+                  onChange={(e) => setDeadlineForm({ ...deadlineForm, title: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg text-xs"
+                />
               </div>
-
-              <form onSubmit={handleUploadSubmit} className="space-y-4 text-sm">
-                <div>
-                  <label className="block text-slate-700 font-medium mb-1">Select Chapter</label>
-                  <select
-                    value={uploadChapter}
-                    onChange={(e) => setUploadChapter(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-emerald-500 bg-white"
-                  >
-                    <option value="Chapter 1: Introduction">Chapter 1: Introduction</option>
-                    <option value="Chapter 2: Literature Review">Chapter 2: Literature Review</option>
-                    <option value="Chapter 3: System Design & Methodology">Chapter 3: System Design & Methodology</option>
-                    <option value="Chapter 4: Implementation & Results">Chapter 4: Implementation & Results</option>
-                    <option value="Chapter 5: Conclusion & Recommendations">Chapter 5: Conclusion & Recommendations</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-medium mb-1">Deliverable Document (PDF / DOCX)</label>
-                  <input
-                    type="file"
-                    required
-                    accept=".pdf,.doc,.docx"
-                    onChange={(e) => setSelectedFile(e.target.files[0])}
-                    className="w-full border border-slate-300 rounded-lg p-2 text-xs outline-none file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
-                  />
-                  {selectedFile && (
-                    <span className="text-[11px] text-emerald-600 mt-1 block">Selected: {selectedFile.name}</span>
-                  )}
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2 border-t">
-                  <button
-                    type="button"
-                    onClick={() => setShowUploadModal(false)}
-                    className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isProcessing}
-                    className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 cursor-pointer font-semibold"
-                  >
-                    {isProcessing ? 'Uploading...' : 'Upload Chapter'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* Modal: Set Deadline */}
-        {showDeadlineModal && (
-          <div className="fixed inset-0 bg-black/50 flex justify-center items-center p-4 z-50">
-            <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4">
-              <div className="flex justify-between items-center border-b pb-3">
-                <h3 className="text-lg font-bold text-slate-900">Set Project Deadline</h3>
-                <button type="button" onClick={() => setShowDeadlineModal(false)} className="text-slate-400 hover:text-slate-600 font-bold cursor-pointer">✕</button>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Due Date</label>
+                <input
+                  type="date"
+                  required
+                  value={deadlineForm.due_date}
+                  onChange={(e) => setDeadlineForm({ ...deadlineForm, due_date: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg text-xs"
+                />
               </div>
-
-              <form onSubmit={handleDeadlineSubmit} className="space-y-4 text-sm">
-                <div>
-                  <label className="block text-slate-700 font-medium mb-1">Phase Title</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Chapter 1 Submission Deadline"
-                    value={deadlineForm.title}
-                    onChange={(e) => setDeadlineForm({ ...deadlineForm, title: e.target.value })}
-                    className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-purple-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-medium mb-1">Cutoff Date & Time</label>
-                  <input
-                    type="datetime-local"
-                    required
-                    value={deadlineForm.deadline_date}
-                    onChange={(e) => setDeadlineForm({ ...deadlineForm, deadline_date: e.target.value })}
-                    className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-purple-500"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2 border-t">
-                  <button
-                    type="button"
-                    onClick={() => setShowDeadlineModal(false)}
-                    className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isProcessing}
-                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 cursor-pointer"
-                  >
-                    Save Deadline
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* Modal: Resubmit Proposal */}
-        {showResubmitModal && (
-          <div className="fixed inset-0 bg-black/50 flex justify-center items-center p-4 z-50">
-            <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-xl w-full p-6 space-y-4">
-              <div className="flex justify-between items-center border-b pb-3">
-                <h3 className="text-lg font-bold text-slate-900">Submit Proposal Corrections</h3>
-                <button type="button" onClick={() => setShowResubmitModal(false)} className="text-slate-400 hover:text-slate-600 font-bold cursor-pointer">✕</button>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Description</label>
+                <textarea
+                  rows="2"
+                  value={deadlineForm.description}
+                  onChange={(e) => setDeadlineForm({ ...deadlineForm, description: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg text-xs"
+                />
               </div>
-
-              <form onSubmit={handleResubmitAction} className="space-y-4 text-sm">
-                <div>
-                  <label className="block text-slate-700 font-medium mb-1">Updated Project Title</label>
-                  <input
-                    type="text"
-                    required
-                    value={resubmitData.title}
-                    onChange={(e) => setResubmitData({ ...resubmitData, title: e.target.value })}
-                    className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-amber-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-medium mb-1">Updated Problem Statement</label>
-                  <textarea
-                    required
-                    rows="3"
-                    value={resubmitData.problem_statement}
-                    onChange={(e) => setResubmitData({ ...resubmitData, problem_statement: e.target.value })}
-                    className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-amber-500"
-                  ></textarea>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-medium mb-1">Updated Aim</label>
-                  <input
-                    type="text"
-                    required
-                    value={resubmitData.aim}
-                    onChange={(e) => setResubmitData({ ...resubmitData, aim: e.target.value })}
-                    className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-amber-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-medium mb-1">Updated Objectives</label>
-                  <textarea
-                    required
-                    rows="3"
-                    value={resubmitData.objectives}
-                    onChange={(e) => setResubmitData({ ...resubmitData, objectives: e.target.value })}
-                    className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-amber-500"
-                  ></textarea>
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2 border-t">
-                  <button
-                    type="button"
-                    onClick={() => setShowResubmitModal(false)}
-                    className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isProcessing}
-                    className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 cursor-pointer"
-                  >
-                    {isProcessing ? 'Submitting...' : 'Upload Revision'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* Modal: Initial Proposal Submit */}
-        {showSubmitModal && (
-          <div className="fixed inset-0 bg-black/50 flex justify-center items-center p-4 z-50">
-            <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-xl w-full p-6 space-y-4">
-              <div className="flex justify-between items-center border-b pb-3">
-                <h3 className="text-lg font-bold text-slate-900">Submit Project Proposal</h3>
-                <button type="button" onClick={() => setShowSubmitModal(false)} className="text-slate-400 hover:text-slate-600 font-bold cursor-pointer">✕</button>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDeadlineModal(false)}
+                  className="px-4 py-2 text-xs border rounded-lg text-slate-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isProcessing}
+                  className="px-4 py-2 text-xs bg-purple-600 text-white rounded-lg font-medium"
+                >
+                  {isProcessing ? 'Saving...' : 'Set Deadline'}
+                </button>
               </div>
-
-              <form onSubmit={handleProposalSubmit} className="space-y-4 text-sm">
-                <div>
-                  <label className="block text-slate-700 font-medium mb-1">Project Title</label>
-                  <input
-                    type="text"
-                    name="title"
-                    required
-                    value={formData.title}
-                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                    placeholder="e.g. Design and Implementation of an AI-Based Student Performance Prediction System"
-                    className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-medium mb-1">Problem Statement</label>
-                  <textarea
-                    name="problem_statement"
-                    required
-                    rows="3"
-                    value={formData.problem_statement}
-                    onChange={(e) => setFormData({ ...formData, problem_statement: e.target.value })}
-                    placeholder="Describe the real-world problem being addressed..."
-                    className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500"
-                  ></textarea>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-medium mb-1">Aim</label>
-                  <input
-                    type="text"
-                    name="aim"
-                    required
-                    value={formData.aim}
-                    onChange={(e) => setFormData({ ...formData, aim: e.target.value })}
-                    placeholder="Primary goal of the project..."
-                    className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 font-medium mb-1">Objectives</label>
-                  <textarea
-                    name="objectives"
-                    required
-                    rows="3"
-                    value={formData.objectives}
-                    onChange={(e) => setFormData({ ...formData, objectives: e.target.value })}
-                    placeholder="1. Design relational schema in MySQL&#10;2. Implement REST API endpoints in Express&#10;3. Build responsive dashboard in React"
-                    className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500"
-                  ></textarea>
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2 border-t">
-                  <button
-                    type="button"
-                    onClick={() => setShowSubmitModal(false)}
-                    className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isProcessing}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
-                  >
-                    {isProcessing ? 'Submitting...' : 'Submit Proposal'}
-                  </button>
-                </div>
-              </form>
-            </div>
+            </form>
           </div>
-        )}
-
-      </div>
+        </div>
+      )}
     </div>
   );
 }
-
-export default App;
