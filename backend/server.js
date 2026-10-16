@@ -234,100 +234,97 @@ app.post('/api/auth/register', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
+    if (!email || !password) {
+        return res.status(400).json({ error: 'Email and password are required.' });
+    }
 
     try {
-        const cleanEmail = email ? email.trim().toLowerCase() : '';
-
-        // Query by email
         const [users] = await db.query(
-            `SELECT * FROM users WHERE LOWER(email) = ? LIMIT 1`,
-            [cleanEmail]
+            `SELECT * FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1`,
+            [email.trim()]
         );
 
         if (!users || users.length === 0) {
-            return res.status(401).json({ error: 'No account found with this email address.' });
+            return res.status(401).json({ error: 'Invalid email or password.' });
         }
 
-        const rawUser = users[0];
-        const userId = rawUser.user_id || rawUser.id;
-        
-        // Grab whatever password column actually has data in it
-        const storedHash = rawUser.password_hash || rawUser.password || rawUser.pass || '';
+        const user = users[0];
+        const rawHash = user.password_hash || user.password;
+        const validPassword = await bcrypt.compare(password, rawHash);
 
-        if (!storedHash) {
-            return res.status(500).json({ error: `User found but password hash column is null. Columns: ${Object.keys(rawUser).join(', ')}` });
+        if (!validPassword) {
+            return res.status(401).json({ error: 'Invalid email or password.' });
         }
 
-        let isMatch = false;
-        try {
-            isMatch = await bcrypt.compare(password, storedHash);
-        } catch (e) {
-            isMatch = (password === storedHash);
-        }
-
-        if (!isMatch && password !== storedHash) {
-            return res.status(401).json({ error: 'Password does not match.' });
-        }
-
-        let role = rawUser.role ? String(rawUser.role).toUpperCase() : null;
-        let department = rawUser.department || 'Computer Science';
+        const userId = user.user_id || user.id;
+        let role = (user.role || 'STUDENT').toUpperCase();
         let studentId = null;
-        let matricNo = null;
         let staffId = null;
+        let matricNo = null;
+        let department = 'Computer Science';
 
+        // 1. Check Student record
         try {
-            const [studentRows] = await db.query(`SELECT * FROM students WHERE user_id = ? OR id = ? LIMIT 1`, [userId, userId]);
+            const [studentRows] = await db.query(
+                `SELECT * FROM students WHERE user_id = ? OR id = ? LIMIT 1`,
+                [userId, userId]
+            );
             if (studentRows && studentRows.length > 0) {
                 const s = studentRows[0];
                 studentId = s.student_id || s.id;
-                matricNo = s.matric_no || s.matricNo || 'N/A';
+                matricNo = s.matric_no;
                 if (s.department) department = s.department;
-                if (!role || role === 'STUDENT' || role === 'DEFAULT') role = 'STUDENT';
+                role = 'STUDENT';
             }
-        } catch (err) {}
+        } catch (e) {}
 
+        // 2. Check Staff record
         try {
-            const [staffRows] = await db.query(`SELECT * FROM staff WHERE user_id = ? OR id = ? LIMIT 1`, [userId]);
+            const [staffRows] = await db.query(
+                `SELECT * FROM staff WHERE user_id = ? OR id = ? LIMIT 1`,
+                [userId, userId]
+            );
             if (staffRows && staffRows.length > 0) {
                 const st = staffRows[0];
                 staffId = st.staff_id || st.id;
                 if (st.department) department = st.department;
-                if (st.designation === 'Project Coordinator') {
+                
+                // Identify COORDINATOR vs SUPERVISOR
+                if (
+                    (st.designation && st.designation.toLowerCase().includes('coordinator')) ||
+                    role === 'COORDINATOR'
+                ) {
                     role = 'COORDINATOR';
-                } else if (!role || role === 'DEFAULT' || role === 'STUDENT') {
+                } else {
                     role = 'SUPERVISOR';
                 }
             }
-        } catch (err) {}
+        } catch (e) {}
 
-        if (!role || role === 'DEFAULT') {
-            role = 'STUDENT';
-        }
-
-        const secretKey = process.env.JWT_SECRET || 'university_project_management_secret_key_2026';
-
+        // Generate JWT Token
         const token = jwt.sign(
-            { userId, email: rawUser.email, role, department },
-            secretKey,
-            { expiresIn: '1d' }
+            { userId, email: user.email, role, department },
+            JWT_SECRET,
+            { expiresIn: '24h' }
         );
 
         return res.json({
+            message: 'Login successful',
             token,
             user: {
                 userId,
-                email: rawUser.email,
-                fullName: rawUser.full_name || rawUser.name || 'User',
+                fullName: user.full_name || user.name,
+                email: user.email,
                 role,
                 department,
                 studentId,
-                matricNo,
-                staffId
+                staffId,
+                matricNo
             }
         });
     } catch (error) {
-        console.error('LOGIN ERROR DETAILS:', error);
-        return res.status(500).json({ error: `Login failed: ${error.message}` });
+        console.error('LOGIN ERROR:', error);
+        return res.status(500).json({ error: 'Internal login error' });
     }
 });
 
