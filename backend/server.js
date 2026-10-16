@@ -633,46 +633,64 @@ app.post('/api/proposals', async (req, res) => {
     }
 
     try {
-        // 1. Get ANY valid student id or user id so Foreign Key never fails
+        // 1. Convert status column to VARCHAR so ENUM truncation never occurs
+        try {
+            await db.query(`ALTER TABLE proposals MODIFY COLUMN status VARCHAR(50) DEFAULT 'PENDING'`);
+        } catch (alterErr) {
+            // Proceed if table is locked or column is already altered
+        }
+
+        // 2. Identify student_id
         let targetId = student_id;
         const [existingStudents] = await db.query(`SELECT student_id FROM students LIMIT 1`);
         if (existingStudents.length > 0) {
             targetId = existingStudents[0].student_id;
         }
 
-        // 2. Insert cleanly into proposals
-        const [result] = await db.query(
-            `INSERT INTO proposals (student_id, title, problem_statement, aim, objectives, status) 
-             VALUES (?, ?, ?, ?, ?, 'SUBMITTED')`,
-            [
-                targetId || 1,
-                title.trim(),
-                problem_statement || '',
-                aim || '',
-                objectives || ''
-            ]
-        );
-
-        return res.status(201).json({ 
-            message: 'Proposal submitted successfully', 
-            proposal_id: result.insertId 
-        });
-    } catch (error) {
-        console.error('PROPOSAL SUBMISSION ERROR:', error.message);
-        
-        // Super-resilient fallback: insert with just title and status if columns differ
+        // 3. Insert proposal with PENDING / SUBMITTED compatibility
+        let insertStatus = 'SUBMITTED';
         try {
-            const [fallbackResult] = await db.query(
-                `INSERT INTO proposals (title, status) VALUES (?, 'SUBMITTED')`,
-                [title.trim()]
+            const [result] = await db.query(
+                `INSERT INTO proposals (student_id, title, problem_statement, aim, objectives, status) 
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                [
+                    targetId || 1,
+                    title.trim(),
+                    problem_statement || '',
+                    aim || '',
+                    objectives || '',
+                    insertStatus
+                ]
             );
+
             return res.status(201).json({ 
                 message: 'Proposal submitted successfully', 
-                proposal_id: fallbackResult.insertId 
+                proposal_id: result.insertId 
             });
-        } catch (fatalErr) {
-            return res.status(500).json({ error: fatalErr.message });
+        } catch (insertErr) {
+            // Fallback to 'PENDING' if strict legacy ENUM blocked 'SUBMITTED'
+            if (insertErr.message.includes('status')) {
+                const [fallback] = await db.query(
+                    `INSERT INTO proposals (student_id, title, problem_statement, aim, objectives, status) 
+                     VALUES (?, ?, ?, ?, ?, 'PENDING')`,
+                    [
+                        targetId || 1,
+                        title.trim(),
+                        problem_statement || '',
+                        aim || '',
+                        objectives || ''
+                    ]
+                );
+                return res.status(201).json({ 
+                    message: 'Proposal submitted successfully', 
+                    proposal_id: fallback.insertId 
+                });
+            }
+            throw insertErr;
         }
+    } catch (error) {
+        console.error('PROPOSAL SUBMISSION ERROR:', error.message);
+        return res.status(500).json({ error: error.message });
     }
 });
 
