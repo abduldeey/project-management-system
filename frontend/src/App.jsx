@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 
+const API_BASE = 'https://project-management-system-k6jh.onrender.com';
+
 const UNIVERSITY_DEPARTMENTS = [
   'Computer Science',
   'Civil Engineering',
@@ -22,7 +24,7 @@ function App() {
     email: '',
     password: '',
     full_name: '',
-    role: 'STUDENT',
+    role: 'student',
     matric_no: '',
     department: 'Computer Science'
   });
@@ -89,9 +91,9 @@ function App() {
     setLoading(true);
     try {
       const [propRes, deadRes, delivRes] = await Promise.all([
-        fetch('const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';/proposals'),
-        fetch('const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';/api/deadlines'),
-        fetch('const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';/api/deliverables')
+        fetch(`${API_BASE}/proposals`),
+        fetch(`${API_BASE}/api/deadlines`),
+        fetch(`${API_BASE}/api/deliverables`)
       ]);
       const propData = await propRes.json();
       const deadData = await deadRes.json();
@@ -102,25 +104,26 @@ function App() {
       setDeliverables(Array.isArray(delivData) ? delivData : []);
 
       if (user?.userId) {
-        const notifRes = await fetch(`const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';/${user.userId}`);
+        const notifRes = await fetch(`${API_BASE}/api/notifications/${user.userId}`);
         const nData = await notifRes.json();
         setNotifications(Array.isArray(nData) ? nData : []);
       }
 
-      if (user?.role === 'STUDENT' && user?.studentId) {
-        const gradeRes = await fetch(`const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';/api/grades/student/${user.studentId}`);
+      const userRoleLower = user?.role?.toLowerCase();
+      if (userRoleLower === 'student' && user?.studentId) {
+        const gradeRes = await fetch(`${API_BASE}/api/grades/student/${user.studentId}`);
         const gData = await gradeRes.json();
         setStudentGrade(gData);
       }
 
-      if (user?.role === 'SUPERVISOR' || user?.role === 'COORDINATOR') {
-        const gradesRes = await fetch('const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';/api/grades');
+      if (userRoleLower === 'supervisor' || userRoleLower === 'coordinator') {
+        const gradesRes = await fetch(`${API_BASE}/api/grades`);
         const gAll = await gradesRes.json();
         setAllGrades(Array.isArray(gAll) ? gAll : []);
       }
 
-      if (user?.role === 'COORDINATOR') {
-        const allocRes = await fetch('const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';/api/allocations');
+      if (userRoleLower === 'coordinator') {
+        const allocRes = await fetch(`${API_BASE}/api/allocations`);
         const aData = await allocRes.json();
         setAllocations(aData);
       }
@@ -149,7 +152,7 @@ function App() {
     const endpoint = authMode === 'LOGIN' ? '/api/auth/login' : '/api/auth/register';
 
     try {
-      const res = await fetch(`const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';${endpoint}`, {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(authData)
@@ -186,7 +189,7 @@ function App() {
     e.preventDefault();
     setIsProcessing(true);
     try {
-      const res = await fetch('const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';/api/deadlines', {
+      const res = await fetch(`${API_BASE}/api/deadlines`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(deadlineForm)
@@ -207,7 +210,7 @@ function App() {
     e.preventDefault();
     setIsProcessing(true);
     try {
-      const res = await fetch('const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';/api/proposals', {
+      const res = await fetch(`${API_BASE}/api/proposals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -242,7 +245,7 @@ function App() {
 
     setIsProcessing(true);
     try {
-      const res = await fetch('const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';/api/deliverables/upload', {
+      const res = await fetch(`${API_BASE}/api/deliverables/upload`, {
         method: 'POST',
         body: formPayload
       });
@@ -266,7 +269,7 @@ function App() {
     e.preventDefault();
     setIsProcessing(true);
     try {
-      const res = await fetch('const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';/api/allocations/assign', {
+      const res = await fetch(`${API_BASE}/api/allocations/assign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(assignData)
@@ -308,7 +311,7 @@ function App() {
     e.preventDefault();
     setIsProcessing(true);
     try {
-      const res = await fetch('const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';/api/grades', {
+      const res = await fetch(`${API_BASE}/api/grades`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -369,7 +372,7 @@ function App() {
 
   const markNotificationRead = async (id) => {
     try {
-      await fetch(`const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';/api/notifications/${id}/read`, { method: 'POST' });
+      await fetch(`${API_BASE}/api/notifications/${id}/read`, { method: 'POST' });
       fetchData();
     } catch (e) {
       console.error(e);
@@ -391,7 +394,7 @@ function App() {
     e.preventDefault();
     setIsProcessing(true);
     try {
-      const res = await fetch(`const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';/api/proposals/${resubmitData.proposal_id}/resubmit`, {
+      const res = await fetch(`${API_BASE}/api/proposals/${resubmitData.proposal_id}/resubmit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(resubmitData)
@@ -410,7 +413,7 @@ function App() {
   const openProposalDetails = async (item) => {
     setSelectedProposal(item);
     try {
-      const res = await fetch(`const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';/api/proposals/${item.proposal_id}/versions`);
+      const res = await fetch(`${API_BASE}/api/proposals/${item.proposal_id}/versions`);
       const vData = await res.json();
       setVersionHistory(Array.isArray(vData) ? vData : []);
     } catch (err) {
@@ -422,7 +425,7 @@ function App() {
     e.preventDefault();
     setIsProcessing(true);
     try {
-      const res = await fetch(`const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';/api/proposals/${selectedProposal.proposal_id}/review`, {
+      const res = await fetch(`${API_BASE}/api/proposals/${selectedProposal.proposal_id}/review`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(reviewAction)
@@ -454,15 +457,17 @@ function App() {
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
 
+  const userRoleLower = user?.role?.toLowerCase();
+
   const displayedDeliverables = useMemo(() => {
-    if (user?.role === 'STUDENT') {
+    if (userRoleLower === 'student') {
       return deliverables.filter(d => d.student_id === user.studentId);
     }
     return deliverables;
-  }, [deliverables, user]);
+  }, [deliverables, user, userRoleLower]);
 
   const filteredProposals = useMemo(() => {
-    let list = user?.role === 'STUDENT'
+    let list = userRoleLower === 'student'
       ? proposals.filter((p) => p.student_id === user.studentId)
       : proposals;
 
@@ -481,7 +486,7 @@ function App() {
     }
 
     return list;
-  }, [proposals, user, statusFilter, searchQuery]);
+  }, [proposals, user, statusFilter, searchQuery, userRoleLower]);
 
   if (!user) {
     return (
@@ -551,13 +556,13 @@ function App() {
                     onChange={handleAuthChange}
                     className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500 bg-white"
                   >
-                    <option value="STUDENT">Student</option>
-                    <option value="SUPERVISOR">Supervisor / Lecturer</option>
-                    <option value="COORDINATOR">Project Coordinator</option>
+                    <option value="student">Student</option>
+                    <option value="supervisor">Supervisor / Lecturer</option>
+                    <option value="coordinator">Project Coordinator</option>
                   </select>
                 </div>
 
-                {authData.role === 'STUDENT' && (
+                {authData.role === 'student' && (
                   <div>
                     <label className="block text-slate-700 font-medium mb-1">Matric Number</label>
                     <input
@@ -670,13 +675,13 @@ function App() {
             </div>
 
             <div className="text-right">
-              <div className="text-sm font-bold text-slate-900">{user.fullName}</div>
+              <div className="text-sm font-bold text-slate-900">{user.fullName || user.full_name}</div>
               <div className="text-xs text-slate-500 font-mono">
-                {user.role} {user.matricNo ? `• ${user.matricNo}` : ''}
+                {user.role?.toUpperCase()} {user.matricNo || user.matric_no ? `• ${user.matricNo || user.matric_no}` : ''}
               </div>
             </div>
 
-            {(user.role === 'COORDINATOR' || user.role === 'SUPERVISOR') && (
+            {(userRoleLower === 'coordinator' || userRoleLower === 'supervisor') && (
               <button
                 type="button"
                 onClick={exportReportCSV}
@@ -686,7 +691,7 @@ function App() {
               </button>
             )}
 
-            {user.role === 'COORDINATOR' && (
+            {userRoleLower === 'coordinator' && (
               <>
                 <button
                   onClick={() => setShowAllocateModal(true)}
@@ -703,7 +708,7 @@ function App() {
               </>
             )}
 
-            {user.role === 'STUDENT' && (
+            {userRoleLower === 'student' && (
               <>
                 <button
                   type="button"
@@ -733,7 +738,7 @@ function App() {
         </header>
 
         {/* Student Defense Grade Banner (If Graded) */}
-        {user.role === 'STUDENT' && studentGrade && (
+        {userRoleLower === 'student' && studentGrade && (
           <div className="bg-gradient-to-r from-emerald-900 to-slate-900 text-white p-6 rounded-2xl shadow-md border border-emerald-700/60 flex flex-wrap justify-between items-center gap-4">
             <div>
               <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400 block mb-1">Official Defense Results</span>
@@ -819,10 +824,10 @@ function App() {
           <div className="flex justify-between items-center">
             <div>
               <h3 className="text-lg font-bold text-slate-900">
-                📁 {user.role === 'STUDENT' ? 'My Uploaded Project Chapters' : 'Submitted Chapter Deliverables'}
+                📁 {userRoleLower === 'student' ? 'My Uploaded Project Chapters' : 'Submitted Chapter Deliverables'}
               </h3>
               <p className="text-xs text-slate-500">
-                {user.role === 'STUDENT' 
+                {userRoleLower === 'student' 
                   ? 'Access and review your uploaded chapter files below.' 
                   : 'Download and inspect submitted student chapter reports.'}
               </p>
@@ -832,7 +837,7 @@ function App() {
 
           {displayedDeliverables.length === 0 ? (
             <div className="p-6 text-center border border-dashed border-slate-200 rounded-lg text-slate-400 text-sm">
-              {user.role === 'STUDENT'
+              {userRoleLower === 'student'
                 ? "You haven't uploaded any chapters yet. Click 📁 Upload Chapter above to submit your first chapter."
                 : "No project chapters have been uploaded by students yet."}
             </div>
@@ -848,7 +853,7 @@ function App() {
                     </div>
                   </div>
                   <a
-                    href={`http://localhost:5000${del.file_url}`}
+                    href={`${API_BASE}${del.file_url}`}
                     target="_blank"
                     rel="noreferrer"
                     className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3 py-2 rounded-lg shadow-sm transition flex items-center gap-1"
@@ -866,10 +871,10 @@ function App() {
           <div className="flex flex-wrap justify-between items-center gap-4">
             <div>
               <h2 className="text-lg font-bold text-slate-900">
-                {user.role === 'STUDENT' ? 'My Proposal Submissions' : 'Proposals Awaiting Review'}
+                {userRoleLower === 'student' ? 'My Proposal Submissions' : 'Proposals Awaiting Review'}
               </h2>
               <p className="text-xs text-slate-500">
-                {user.role === 'STUDENT'
+                {userRoleLower === 'student'
                   ? 'Track your project proposal approvals, version numbers, and resubmit corrections.'
                   : 'Review submitted topics, inspect objectives, issue approval decisions, and evaluate defense grades.'}
               </p>
@@ -909,7 +914,7 @@ function App() {
             <p className="text-slate-500 text-sm py-4">Loading from database...</p>
           ) : filteredProposals.length === 0 ? (
             <div className="text-center py-8 text-slate-400 text-sm">
-              {user.role === 'STUDENT'
+              {userRoleLower === 'student'
                 ? "You have not submitted a proposal yet. Click '+ Submit Proposal' above to start."
                 : "No matching proposals found for the selected query/filter."}
             </div>
@@ -951,7 +956,7 @@ function App() {
                           </span>
                         </td>
                         <td className="py-3.5 px-4 text-right space-x-2">
-                          {(user.role === 'SUPERVISOR' || user.role === 'COORDINATOR') && (
+                          {(userRoleLower === 'supervisor' || userRoleLower === 'coordinator') && (
                             <button
                               type="button"
                               onClick={() => openGradingModal(item)}
@@ -964,7 +969,7 @@ function App() {
                               {gradeRecord ? `Graded: ${gradeRecord.total_score}% (${gradeRecord.letter_grade})` : '📝 Grade Defense'}
                             </button>
                           )}
-                          {user.role === 'STUDENT' && item.status === 'UNDER_REVIEW' && (
+                          {userRoleLower === 'student' && item.status === 'UNDER_REVIEW' && (
                             <button
                               type="button"
                               onClick={() => openResubmitModal(item)}
@@ -978,7 +983,7 @@ function App() {
                             onClick={() => openProposalDetails(item)}
                             className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold px-3 py-1.5 rounded-md border border-slate-300 transition cursor-pointer"
                           >
-                            {user.role === 'SUPERVISOR' || user.role === 'COORDINATOR' ? 'Review & Grade' : 'View History & Feedback'}
+                            {userRoleLower === 'supervisor' || userRoleLower === 'coordinator' ? 'Review & Grade' : 'View History & Feedback'}
                           </button>
                         </td>
                       </tr>
@@ -1203,7 +1208,7 @@ function App() {
                 ))}
               </div>
 
-              {user.role === 'SUPERVISOR' || user.role === 'COORDINATOR' ? (
+              {(userRoleLower === 'supervisor' || userRoleLower === 'coordinator') ? (
                 <form onSubmit={handleReviewSubmit} className="space-y-3 pt-2 border-t">
                   <h4 className="text-sm font-bold text-slate-900">Decision & Action</h4>
                   
@@ -1533,4 +1538,5 @@ function App() {
     </div>
   );
 }
-export default App;                                                                
+
+export default App;
