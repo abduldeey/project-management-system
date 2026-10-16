@@ -336,90 +336,77 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/allocations', async (req, res) => {
     try {
-        // 1. Fetch Students: Check students table or fallback to users with STUDENT role
-        let students = [];
-        try {
-            const [sRows] = await db.query(`
-                SELECT 
-                    s.student_id, 
-                    COALESCE(u.full_name, u.name, 'Student') AS full_name, 
-                    COALESCE(s.matric_no, u.matric_no, 'U26/CS/1008') AS matric_no 
-                FROM students s 
-                LEFT JOIN users u ON s.user_id = u.user_id OR s.user_id = u.id
-            `);
-            students = sRows;
-        } catch (e) {}
+        // Query all users to inspect and categorize safely
+        const [allUsers] = await db.query(`SELECT * FROM users`);
+        
+        const students = [];
+        const supervisors = [];
 
-        if (!students || students.length === 0) {
-            const [uStudents] = await db.query(`
-                SELECT 
-                    user_id AS student_id, 
-                    COALESCE(full_name, name, 'Student') AS full_name, 
-                    COALESCE(matric_no, 'U26/CS/1008') AS matric_no 
-                FROM users 
-                WHERE UPPER(role) = 'STUDENT'
-            `);
-            students = uStudents;
-        }
+        (allUsers || []).forEach(u => {
+            const r = (u.role || '').toString().toLowerCase().trim();
+            const email = (u.email || '').toString().toLowerCase().trim();
+            
+            // Skip the coordinator herself
+            if (r.includes('coord') || email === 'maryamdalhatu@gmail.com') {
+                return;
+            }
 
-        // 2. Fetch Supervisors: Check staff table or fallback to users with SUPERVISOR role
-        let supervisors = [];
-        try {
-            const [spRows] = await db.query(`
-                SELECT 
-                    st.staff_id, 
-                    COALESCE(u.full_name, u.name, 'Supervisor') AS full_name 
-                FROM staff st 
-                LEFT JOIN users u ON st.user_id = u.user_id OR st.user_id = u.id
-            `);
-            supervisors = spRows;
-        } catch (e) {}
+            const cleanUser = {
+                student_id: u.student_id || u.user_id || u.id,
+                staff_id: u.staff_id || u.supervisor_id || u.user_id || u.id,
+                full_name: u.full_name || u.fullName || u.name || email,
+                matric_no: u.matric_no || u.matricNo || 'N/A',
+                email: u.email
+            };
 
-        if (!supervisors || supervisors.length === 0) {
-            const [uSupervisors] = await db.query(`
-                SELECT 
-                    user_id AS staff_id, 
-                    COALESCE(full_name, name, 'Supervisor') AS full_name 
-                FROM users 
-                WHERE UPPER(role) = 'SUPERVISOR'
-            `);
-            supervisors = uSupervisors;
-        }
+            if (r.includes('super') || r.includes('lect') || r.includes('facul')) {
+                supervisors.push(cleanUser);
+            } else {
+                // Anyone else that is not coordinator or supervisor defaults to student
+                students.push(cleanUser);
+            }
+        });
 
         return res.json({ students, supervisors });
     } catch (err) {
-        console.error('ALLOCATION FETCH ERROR:', err.message);
-        return res.json({ students: [], supervisors: [] });
+        console.error('CRITICAL ALLOCATION ERROR:', err.message);
+        return res.status(500).json({ error: err.message, students: [], supervisors: [] });
     }
 });
 
-app.post('/api/allocations', async (req, res) => {
+app.post('/api/deadlines', async (req, res) => {
     try {
-        const { studentId, student_id, supervisorId, supervisor_id } = req.body;
-        const sId = studentId || student_id;
-        const spId = supervisorId || supervisor_id;
+        const { title, due_date, deadline_date, description } = req.body;
+        let d = due_date || deadline_date;
 
-        if (!sId || !spId) {
-            return res.status(400).json({ error: 'Student and Supervisor IDs are required.' });
+        if (!title || !d) {
+            return res.status(400).json({ error: 'Title and date are required.' });
+        }
+
+        // Convert DD/MM/YYYY if sent by local browser inputs
+        if (typeof d === 'string' && d.includes('/')) {
+            const parts = d.split('/');
+            if (parts.length === 3) {
+                d = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+            }
         }
 
         try {
             await db.query(
-                `INSERT INTO allocations (student_id, supervisor_id) VALUES (?, ?)`,
-                [sId, spId]
+                `INSERT INTO deadlines (title, deadline_date, description) VALUES (?, ?, ?)`,
+                [title, d, description || '']
             );
-        } catch (e) {
-            // If table has staff_id instead of supervisor_id
+            return res.json({ message: 'Deadline established successfully' });
+        } catch (e1) {
             await db.query(
-                `INSERT INTO allocations (student_id, staff_id) VALUES (?, ?)`,
-                [sId, spId]
+                `INSERT INTO deadlines (title, due_date, description) VALUES (?, ?, ?)`,
+                [title, d, description || '']
             );
+            return res.json({ message: 'Deadline established successfully' });
         }
-
-        return res.json({ message: 'Supervisor allocated successfully' });
     } catch (err) {
-        console.error('ALLOCATE POST ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to allocate: ' + err.message });
+        console.error('DEADLINE POST ERROR:', err.message);
+        return res.status(500).json({ error: err.message });
     }
 });
 // --- 3. NOTIFICATIONS ---
