@@ -26,6 +26,7 @@ function App() {
     full_name: '',
     role: 'student',
     matric_no: '',
+    staff_no: '',
     department: 'Computer Science'
   });
   const [authError, setAuthError] = useState('');
@@ -37,14 +38,14 @@ function App() {
   const [allocations, setAllocations] = useState({ students: [], supervisors: [] });
   const [studentGrade, setStudentGrade] = useState(null);
   const [allGrades, setAllGrades] = useState([]);
-  
+
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
 
   const [showNotifs, setShowNotifs] = useState(false);
   const [loading, setLoading] = useState(false);
-  
+
   // Modals
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [showResubmitModal, setShowResubmitModal] = useState(false);
@@ -55,7 +56,7 @@ function App() {
   const [selectedProposal, setSelectedProposal] = useState(null);
   const [gradingTarget, setGradingTarget] = useState(null);
   const [versionHistory, setVersionHistory] = useState([]);
-  
+
   const [reviewAction, setReviewAction] = useState({ status: 'APPROVED', feedback_notes: '' });
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -98,7 +99,7 @@ function App() {
       const propData = await propRes.json();
       const deadData = await deadRes.json();
       const delivData = await delivRes.json();
-      
+
       setProposals(Array.isArray(propData) ? propData : []);
       setDeadlines(Array.isArray(deadData) ? deadData : []);
       setDeliverables(Array.isArray(delivData) ? delivData : []);
@@ -249,7 +250,7 @@ function App() {
         method: 'POST',
         body: formPayload
       });
-      
+
       if (res.ok) {
         alert('File uploaded successfully!');
         setSelectedFile(null);
@@ -350,7 +351,7 @@ function App() {
         p.proposal_id,
         `"${p.student_name.replace(/"/g, '""')}"`,
         `"${p.matric_no}"`,
-        `"${p.department || 'General'}"`,
+        `"${p.department || user?.department || 'General'}"`,
         `"${p.title.replace(/"/g, '""')}"`,
         `v${p.latest_version || 1}`,
         p.status,
@@ -456,7 +457,6 @@ function App() {
   };
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
-
   const userRoleLower = user?.role?.toLowerCase();
 
   const displayedDeliverables = useMemo(() => {
@@ -500,13 +500,13 @@ function App() {
           <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-semibold">
             <button
               onClick={() => { setAuthMode('LOGIN'); setAuthError(''); }}
-              className={`w-1/2 py-2 rounded-md transition ${authMode === 'LOGIN' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+              className={`w-1/2 py-2 rounded-md transition cursor-pointer ${authMode === 'LOGIN' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
             >
               Sign In
             </button>
             <button
               onClick={() => { setAuthMode('REGISTER'); setAuthError(''); }}
-              className={`w-1/2 py-2 rounded-md transition ${authMode === 'REGISTER' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
+              className={`w-1/2 py-2 rounded-md transition cursor-pointer ${authMode === 'REGISTER' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}
             >
               Register New Account
             </button>
@@ -529,7 +529,7 @@ function App() {
                     required
                     value={authData.full_name}
                     onChange={handleAuthChange}
-                    placeholder="e.g. Amina Bello"
+                    placeholder="e.g. Dr. Zubair MPH"
                     className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500"
                   />
                 </div>
@@ -562,7 +562,7 @@ function App() {
                   </select>
                 </div>
 
-                {authData.role === 'student' && (
+                {authData.role === 'student' ? (
                   <div>
                     <label className="block text-slate-700 font-medium mb-1">Matric Number</label>
                     <input
@@ -571,7 +571,20 @@ function App() {
                       required
                       value={authData.matric_no}
                       onChange={handleAuthChange}
-                      placeholder="e.g. U21/CS/1045 or U22/CE/2001"
+                      placeholder="e.g. U21/CS/1045"
+                      className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-slate-700 font-medium mb-1">Staff ID / Number</label>
+                    <input
+                      type="text"
+                      name="staff_no"
+                      required
+                      value={authData.staff_no}
+                      onChange={handleAuthChange}
+                      placeholder="e.g. STF/CS/401"
                       className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500"
                     />
                   </div>
@@ -608,7 +621,7 @@ function App() {
             <button
               type="submit"
               disabled={isProcessing}
-              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-sm transition disabled:opacity-50"
+              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-sm transition disabled:opacity-50 cursor-pointer"
             >
               {isProcessing ? 'Processing...' : authMode === 'LOGIN' ? 'Sign In to Portal' : 'Create Account'}
             </button>
@@ -943,7 +956,7 @@ function App() {
                         <td className="py-3.5 px-4 font-mono text-xs text-slate-400">#{item.proposal_id}</td>
                         <td className="py-3.5 px-4 font-semibold text-slate-900">{item.student_name}</td>
                         <td className="py-3.5 px-4 font-mono text-xs text-slate-600">{item.matric_no}</td>
-                        <td className="py-3.5 px-4 text-xs text-slate-500">{item.department || 'Computer Science'}</td>
+                        <td className="py-3.5 px-4 text-xs text-slate-500">{item.department || user?.department || 'Computer Science'}</td>
                         <td className="py-3.5 px-4 max-w-xs font-medium text-slate-800">{item.title}</td>
                         <td className="py-3.5 px-4">
                           <span className="bg-slate-100 text-slate-700 text-xs font-mono font-bold px-2 py-0.5 rounded border border-slate-200">
@@ -995,7 +1008,7 @@ function App() {
           )}
         </main>
 
-        {/* Modal: Grade Project Defense (Supervisor & Coordinator) */}
+        {/* Modal: Grade Project Defense */}
         {showGradingModal && gradingTarget && (
           <div className="fixed inset-0 bg-black/50 flex justify-center items-center p-4 z-50">
             <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-4">
@@ -1096,7 +1109,7 @@ function App() {
           </div>
         )}
 
-        {/* Modal: Allocate Supervisors (Coordinator) */}
+        {/* Modal: Allocate Supervisors */}
         {showAllocateModal && (
           <div className="fixed inset-0 bg-black/50 flex justify-center items-center p-4 z-50">
             <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-4">
@@ -1176,7 +1189,6 @@ function App() {
                 <button type="button" onClick={() => setSelectedProposal(null)} className="text-slate-400 hover:text-slate-600 text-lg font-bold cursor-pointer">✕</button>
               </div>
 
-              {/* Version History List */}
               <div className="space-y-4">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Revisions & Feedback Audit</h4>
                 {versionHistory.map((v) => (
@@ -1469,7 +1481,7 @@ function App() {
                     required
                     value={formData.title}
                     onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                    placeholder="e.g. AI-Powered Smart Campus Navigation"
+                    placeholder="e.g. Design and Implementation of an AI-Based Student Performance Prediction System"
                     className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500"
                   />
                 </div>
@@ -1482,7 +1494,7 @@ function App() {
                     rows="3"
                     value={formData.problem_statement}
                     onChange={(e) => setFormData({ ...formData, problem_statement: e.target.value })}
-                    placeholder="Describe the problem being solved..."
+                    placeholder="Describe the real-world problem being addressed..."
                     className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500"
                   ></textarea>
                 </div>
@@ -1495,7 +1507,7 @@ function App() {
                     required
                     value={formData.aim}
                     onChange={(e) => setFormData({ ...formData, aim: e.target.value })}
-                    placeholder="Aim of the project..."
+                    placeholder="Primary goal of the project..."
                     className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500"
                   />
                 </div>
@@ -1508,7 +1520,7 @@ function App() {
                     rows="3"
                     value={formData.objectives}
                     onChange={(e) => setFormData({ ...formData, objectives: e.target.value })}
-                    placeholder="1. Design database. 2. Implement API."
+                    placeholder="1. Design relational schema in MySQL&#10;2. Implement REST API endpoints in Express&#10;3. Build responsive dashboard in React"
                     className="w-full border border-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500"
                   ></textarea>
                 </div>
