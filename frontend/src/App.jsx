@@ -111,7 +111,9 @@ function App() {
         setNotifications(Array.isArray(nData) ? nData : []);
       }
 
-      const userRoleLower = user?.role?.toLowerCase();
+      const userRoleLower = (user?.role || '').toLowerCase();
+const isCoordinator = userRoleLower === 'coordinator' || (user?.email && user.email.toLowerCase().includes('coord'));
+const isSupervisor = userRoleLower === 'supervisor' && !isCoordinator;
       if (userRoleLower === 'student' && (user?.studentId || user?.userId)) {
         const sid = user.studentId || user.userId;
         const gradeRes = await fetch(`${API_BASE}/api/grades/student/${sid}`);
@@ -695,7 +697,7 @@ function App() {
             <div className="text-right">
               <div className="text-sm font-bold text-slate-900">{user.fullName || user.full_name}</div>
               <div className="text-xs text-slate-500 font-mono">
-                {user.role?.toUpperCase()} {user.matricNo || user.matric_no ? `• ${user.matricNo || user.matric_no}` : ''}
+                {isCoordinator ? 'COORDINATOR' : user.role?.toUpperCase()} {user.matricNo || user.matric_no ? `• ${user.matricNo || user.matric_no}` : ''}
               </div>
             </div>
 
@@ -709,7 +711,7 @@ function App() {
               </button>
             )}
 
-            {userRoleLower === 'coordinator' && (
+            {(userRoleLower === 'coordinator' || isCoordinator) && (
               <>
                 <button
                   onClick={() => setShowAllocateModal(true)}

@@ -289,7 +289,7 @@ app.post('/api/auth/login', async (req, res) => {
                 staffId = st.staff_id || st.id;
                 if (st.department) department = st.department;
                 
-                // Identify COORDINATOR vs SUPERVISOR
+                // If staff designation mentions coordinator, or the user table says coordinator
                 if (
                     (st.designation && st.designation.toLowerCase().includes('coordinator')) ||
                     role === 'COORDINATOR'
@@ -301,7 +301,11 @@ app.post('/api/auth/login', async (req, res) => {
             }
         } catch (e) {}
 
-        // Generate JWT Token
+        // Bulletproof override: if email has "coord" in it, ALWAYS make them a coordinator
+        if (user.email && user.email.toLowerCase().includes('coord')) {
+            role = 'COORDINATOR';
+        }
+
         const token = jwt.sign(
             { userId, email: user.email, role, department },
             JWT_SECRET,
