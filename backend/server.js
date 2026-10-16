@@ -495,35 +495,43 @@ app.post('/api/deliverables', upload.single('file'), async (req, res) => {
         const body = req.body || {};
         const studentId = body.student_id || body.studentId;
         const chapterTitle = body.chapter_title || body.chapterTitle || 'Chapter Submission';
-        
-        const fileUrl = req.file ? `/uploads/${req.file.filename}` : 'uploaded_document.pdf';
+        const fileUrl = req.file ? `/uploads/${req.file.filename}` : (body.file_url || 'uploaded_document.pdf');
 
         if (!studentId) {
             return res.status(400).json({ error: 'Missing student identifier.' });
         }
 
-        await db.query(`
-            CREATE TABLE IF NOT EXISTS deliverables (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                student_id INT NOT NULL,
-                chapter_title VARCHAR(255) NOT NULL,
-                file_url VARCHAR(255),
-                status VARCHAR(50) DEFAULT 'SUBMITTED',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        `).catch(() => {});
+        // 1. Inspect the real columns in the deliverables table
+        const [columns] = await db.query(`SHOW COLUMNS FROM deliverables`);
+        const colNames = columns.map(c => c.Field);
 
-        try {
-            await db.query(
-                `INSERT INTO deliverables (student_id, chapter_title, file_url) VALUES (?, ?, ?)`,
-                [studentId, chapterTitle, fileUrl]
-            );
-        } catch (e1) {
-            await db.query(
-                `INSERT INTO deliverables (user_id, chapter_title, file_url) VALUES (?, ?, ?)`,
-                [studentId, chapterTitle, fileUrl]
-            );
-        }
+        // 2. Dynamically match columns present in the schema
+        const insertData = {};
+
+        // Student ID column mapping
+        if (colNames.includes('student_id')) insertData['student_id'] = studentId;
+        else if (colNames.includes('user_id')) insertData['user_id'] = studentId;
+        else if (colNames.includes('id') && !colNames.includes('deliverable_id')) insertData['id'] = studentId;
+
+        // Chapter title column mapping
+        if (colNames.includes('chapter_title')) insertData['chapter_title'] = chapterTitle;
+        else if (colNames.includes('title')) insertData['title'] = chapterTitle;
+        else if (colNames.includes('chapter')) insertData['chapter'] = chapterTitle;
+
+        // File path/url column mapping
+        if (colNames.includes('file_url')) insertData['file_url'] = fileUrl;
+        else if (colNames.includes('file_path')) insertData['file_path'] = fileUrl;
+        else if (colNames.includes('file')) insertData['file'] = fileUrl;
+
+        // Status column mapping (if present)
+        if (colNames.includes('status')) insertData['status'] = 'SUBMITTED';
+
+        const keys = Object.keys(insertData);
+        const values = Object.values(insertData);
+        const placeholders = keys.map(() => '?').join(', ');
+
+        const sql = `INSERT INTO deliverables (${keys.join(', ')}) VALUES (${placeholders})`;
+        await db.query(sql, values);
 
         return res.json({ message: 'Chapter uploaded successfully!' });
     } catch (err) {
