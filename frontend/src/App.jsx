@@ -30,15 +30,23 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
+  // Modals
   const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [showDeadlineModal, setShowDeadlineModal] = useState(false);
 
+  // Forms
   const [formData, setFormData] = useState({
     title: '',
     problem_statement: '',
     aim: '',
     objectives: ''
+  });
+
+  const [uploadData, setUploadData] = useState({
+    chapter_title: 'Chapter 1',
+    file: null
   });
 
   const [deadlineForm, setDeadlineForm] = useState({
@@ -55,15 +63,22 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
 
-  // --- ROLE CHECKS ---
+  // --- DYNAMIC ROLE EVALUATION ---
   const safeUser = user || {};
-  const userRoleLower = (safeUser.role || '').toLowerCase();
-  const userEmail = (safeUser.email || '').toLowerCase();
+  const rawRole = (safeUser.role || safeUser.user_role || '').toString().toLowerCase().trim();
+  const rawEmail = (safeUser.email || '').toString().toLowerCase().trim();
+
   const isCoordinator =
-    userRoleLower === 'coordinator' ||
-    userEmail.includes('coord') ||
-    userEmail === 'maryamdalhatu@gmail.com';
-  const isSupervisor = userRoleLower === 'supervisor' && !isCoordinator;
+    rawRole.includes('coord') ||
+    rawRole === 'admin' ||
+    rawEmail.includes('coord') ||
+    rawEmail === 'maryamdalhatu@gmail.com';
+
+  const isSupervisor =
+    (rawRole.includes('super') || rawRole.includes('lect') || rawRole.includes('facul')) &&
+    !isCoordinator;
+
+  const isStudent = !isCoordinator && !isSupervisor;
 
   // --- FETCH DATA ---
   const fetchData = async () => {
@@ -171,6 +186,42 @@ export default function App() {
     }
   };
 
+  // --- DELIVERABLE / CHAPTER UPLOAD ---
+  const handleUploadChapter = async (e) => {
+    e.preventDefault();
+    if (!uploadData.file) {
+      alert('Please select a file to upload.');
+      return;
+    }
+    setIsProcessing(true);
+    try {
+      const targetStudentId = safeUser.studentId || safeUser.student_id || safeUser.userId || safeUser.id;
+      const formDataUpload = new FormData();
+      formDataUpload.append('student_id', targetStudentId);
+      formDataUpload.append('chapter_title', uploadData.chapter_title);
+      formDataUpload.append('file', uploadData.file);
+
+      const res = await fetch(`${API_BASE}/api/deliverables`, {
+        method: 'POST',
+        body: formDataUpload
+      });
+
+      if (res.ok) {
+        alert('Chapter uploaded successfully!');
+        setShowUploadModal(false);
+        setUploadData({ chapter_title: 'Chapter 1', file: null });
+        await fetchData();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert('Upload failed: ' + (errData.error || res.statusText));
+      }
+    } catch (err) {
+      alert('Upload error: ' + err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // --- COORDINATOR ACTIONS ---
   const handleSetDeadline = async (e) => {
     e.preventDefault();
@@ -180,17 +231,13 @@ export default function App() {
       if (cleanDate && cleanDate.includes('/')) {
         const parts = cleanDate.split('/');
         if (parts.length === 3) {
-          // Converts DD/MM/YYYY to YYYY-MM-DD
           cleanDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
         }
       }
 
       const res = await fetch(`${API_BASE}/api/deadlines`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: deadlineForm.title,
           due_date: cleanDate,
@@ -199,18 +246,17 @@ export default function App() {
         })
       });
 
-      const resData = await res.json().catch(() => ({}));
-
       if (res.ok) {
         setDeadlineForm({ title: '', due_date: '', description: '' });
         setShowDeadlineModal(false);
         await fetchData();
         alert('Deadline created successfully');
       } else {
+        const resData = await res.json().catch(() => ({}));
         alert('Failed to set deadline: ' + (resData.error || res.statusText));
       }
     } catch (err) {
-      alert('Error creating deadline: ' + err.message);
+      alert('Error creating deadline');
     } finally {
       setIsProcessing(false);
     }
@@ -230,7 +276,8 @@ export default function App() {
         await fetchData();
         alert('Supervisor allocated successfully');
       } else {
-        alert('Allocation failed');
+        const resData = await res.json().catch(() => ({}));
+        alert('Allocation failed: ' + (resData.error || res.statusText));
       }
     } catch (err) {
       alert('Error allocating supervisor');
@@ -385,34 +432,31 @@ export default function App() {
             {isCoordinator && (
               <>
                 <button
-  type="button"
-  onClick={async () => {
-    setShowAllocateModal(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/allocations`);
-      if (res.ok) {
-        const data = await res.json();
-        setAllocations(data);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  }}
-  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition"
->
-  👥 Allocate
-</button>
+                  type="button"
+                  onClick={async () => {
+                    setShowAllocateModal(true);
+                    try {
+                      const res = await fetch(`${API_BASE}/api/allocations`);
+                      if (res.ok) {
+                        const data = await res.json();
+                        setAllocations(data);
+                      }
+                    } catch (err) {
+                      console.error(err);
+                    }
+                  }}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition"
+                >
+                  👥 Allocate
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDeadlineModal(true)}
+                  className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition"
+                >
+                  + Set Deadline
+                </button>
               </>
-            )}
-
-            {userRoleLower === 'student' && (
-              <button
-                type="button"
-                onClick={() => setShowSubmitModal(true)}
-                className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition"
-              >
-                + Submit Proposal
-              </button>
             )}
 
             <div className="text-right border-l pl-3 ml-1 border-slate-200">
@@ -437,6 +481,7 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full space-y-6">
+        {/* Deadlines Section */}
         <section className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
           <h2 className="text-sm font-bold text-slate-800 mb-3">Project Deadlines</h2>
           {deadlines.length === 0 ? (
@@ -448,7 +493,7 @@ export default function App() {
                   <div className="text-xs font-semibold text-slate-800">{d.title}</div>
                   <div className="text-[11px] text-slate-500 mt-1">{d.description || 'Deliverable timeline'}</div>
                   <div className="text-[11px] font-medium text-purple-600 mt-2">
-                    Due: {d.due_date ? new Date(d.due_date).toLocaleDateString() : 'TBD'}
+                    Due: {d.due_date || d.deadline_date ? new Date(d.due_date || d.deadline_date).toLocaleDateString() : 'TBD'}
                   </div>
                 </div>
               ))}
@@ -456,6 +501,70 @@ export default function App() {
           )}
         </section>
 
+        {/* Deliverables / Chapters Section */}
+        <section className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+            <div>
+              <h2 className="text-sm font-bold text-slate-800">
+                Project Chapters & Deliverables
+              </h2>
+              <p className="text-xs text-slate-500">
+                Upload and view submitted milestone files ({deliverables.length} files total)
+              </p>
+            </div>
+
+            {isStudent && (
+              <button
+                type="button"
+                onClick={() => setShowUploadModal(true)}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition shadow-sm"
+              >
+                📁 Upload Chapter
+              </button>
+            )}
+          </div>
+
+          {deliverables.length === 0 ? (
+            <div className="border border-dashed border-slate-200 rounded-lg p-6 text-center text-slate-400 text-xs">
+              No project chapters uploaded yet.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-100 text-slate-600 uppercase tracking-wider text-[11px]">
+                    <th className="py-2.5 px-3">Chapter</th>
+                    <th className="py-2.5 px-3">Student</th>
+                    <th className="py-2.5 px-3">Submitted</th>
+                    <th className="py-2.5 px-3">File</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {deliverables.map((d, idx) => (
+                    <tr key={d.deliverable_id || d.id || idx} className="hover:bg-slate-50/50">
+                      <td className="py-2.5 px-3 font-medium text-slate-900">{d.chapter_title}</td>
+                      <td className="py-2.5 px-3">{d.student_name} ({d.matric_no || 'N/A'})</td>
+                      <td className="py-2.5 px-3 text-slate-500">
+                        {d.created_at ? new Date(d.created_at).toLocaleDateString() : 'Recent'}
+                      </td>
+                      <td className="py-2.5 px-3 text-indigo-600 underline">
+                        {d.file_url ? (
+                          <a href={d.file_url} target="_blank" rel="noreferrer">
+                            Download
+                          </a>
+                        ) : (
+                          'Uploaded'
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* Proposals Table Section */}
         <section className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
             <div>
@@ -465,13 +574,13 @@ export default function App() {
               </p>
             </div>
 
-            <div className="flex gap-2 w-full sm:w-auto">
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
               <input
                 type="text"
                 placeholder="Search proposals..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="px-3 py-1.5 border rounded-lg text-xs w-full sm:w-48"
+                className="px-3 py-1.5 border rounded-lg text-xs w-full sm:w-44"
               />
               <select
                 value={statusFilter}
@@ -484,13 +593,23 @@ export default function App() {
                 <option value="APPROVED">Approved</option>
                 <option value="REJECTED">Rejected</option>
               </select>
+
+              {isStudent && (
+                <button
+                  type="button"
+                  onClick={() => setShowSubmitModal(true)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3.5 py-1.5 rounded-lg transition shadow-sm whitespace-nowrap"
+                >
+                  + Submit Proposal
+                </button>
+              )}
             </div>
           </div>
 
           <div className="overflow-x-auto">
             {filteredProposals.length === 0 ? (
               <div className="p-8 text-center text-xs text-slate-500">
-                {userRoleLower === 'student'
+                {isStudent
                   ? "You have not submitted a proposal yet. Click '+ Submit Proposal' above to start."
                   : 'No project proposals found.'}
               </div>
@@ -524,7 +643,7 @@ export default function App() {
         </section>
       </main>
 
-      {/* MODALS */}
+      {/* SUBMIT PROPOSAL MODAL */}
       {showSubmitModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl shadow-lg max-w-lg w-full p-6 border border-slate-200">
@@ -579,6 +698,61 @@ export default function App() {
         </div>
       )}
 
+      {/* UPLOAD CHAPTER MODAL */}
+      {showUploadModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6 border border-slate-200">
+            <h3 className="text-base font-bold text-slate-800 mb-4">Upload Project Chapter</h3>
+            <form onSubmit={handleUploadChapter} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Select Chapter</label>
+                <select
+                  value={uploadData.chapter_title}
+                  onChange={(e) => setUploadData({ ...uploadData, chapter_title: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg text-xs bg-white"
+                >
+                  <option value="Chapter 1">Chapter 1 - Introduction</option>
+                  <option value="Chapter 2">Chapter 2 - Literature Review</option>
+                  <option value="Chapter 3">Chapter 3 - System Analysis & Design</option>
+                  <option value="Chapter 4">Chapter 4 - Implementation & Testing</option>
+                  <option value="Chapter 5">Chapter 5 - Conclusion & Recommendations</option>
+                  <option value="Full Project Report">Full Project Report</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Document File (.pdf, .doc, .docx)</label>
+                <input
+                  type="file"
+                  required
+                  accept=".pdf,.doc,.docx"
+                  onChange={(e) => setUploadData({ ...uploadData, file: e.target.files[0] })}
+                  className="w-full px-3 py-2 border rounded-lg text-xs file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowUploadModal(false)}
+                  className="px-4 py-2 text-xs border rounded-lg text-slate-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isProcessing}
+                  className="px-4 py-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium"
+                >
+                  {isProcessing ? 'Uploading...' : 'Upload Document'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ALLOCATE SUPERVISOR MODAL */}
       {showAllocateModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6 border border-slate-200">
@@ -637,6 +811,7 @@ export default function App() {
         </div>
       )}
 
+      {/* SET DEADLINE MODAL */}
       {showDeadlineModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6 border border-slate-200">
