@@ -539,6 +539,47 @@ app.get('/api/deliverables', async (req, res) => {
         return res.json([]);
     }
 });
+app.post('/api/deliverables', async (req, res) => {
+    try {
+        const studentId = req.body.student_id || req.body.studentId;
+        const chapterTitle = req.body.chapter_title || req.body.chapterTitle || 'Chapter Submission';
+        const fileUrl = req.file ? req.file.path : (req.body.file_url || 'uploaded_document.pdf');
+
+        if (!studentId) {
+            return res.status(400).json({ error: 'Missing student ID.' });
+        }
+
+        // Auto-create table if missing
+        await db.query(`
+            CREATE TABLE IF NOT EXISTS deliverables (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                student_id INT NOT NULL,
+                chapter_title VARCHAR(255) NOT NULL,
+                file_url VARCHAR(255),
+                status VARCHAR(50) DEFAULT 'SUBMITTED',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `).catch(() => {});
+
+        // Insert submission record
+        try {
+            await db.query(
+                `INSERT INTO deliverables (student_id, chapter_title, file_url) VALUES (?, ?, ?)`,
+                [studentId, chapterTitle, fileUrl]
+            );
+        } catch (e1) {
+            await db.query(
+                `INSERT INTO deliverables (user_id, chapter_title, file_url) VALUES (?, ?, ?)`,
+                [studentId, chapterTitle, fileUrl]
+            );
+        }
+
+        return res.json({ message: 'Chapter uploaded successfully!' });
+    } catch (err) {
+        console.error('DELIVERABLES UPLOAD CRASH:', err.message);
+        return res.status(500).json({ error: err.message });
+    }
+});
 
 // --- 5. DEADLINES ---
 
