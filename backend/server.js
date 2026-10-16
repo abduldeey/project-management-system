@@ -433,28 +433,25 @@ app.post('/api/deliverables/upload', upload.single('deliverableFile'), async (re
 
 app.get('/api/deliverables', async (req, res) => {
     try {
-        const [uCols] = await db.query(`SHOW COLUMNS FROM users`);
-        const idCol = uCols.some(c => c.Field === 'id') ? 'id' : 'user_id';
-
-        const [docs] = await db.query(`
+        const [rows] = await db.query(`
             SELECT 
                 d.deliverable_id,
-                d.student_id,
                 d.chapter_title,
                 d.file_name,
                 d.file_url,
-                d.uploaded_at,
-                COALESCE(u.full_name, 'Student') AS student_name,
-                COALESCE(s.matric_no, 'N/A') AS matric_no,
-                COALESCE(s.department, 'General') AS department
+                d.student_id,
+                COALESCE(u.full_name, u.name, 'Student') AS student_name,
+                COALESCE(s.matric_no, 'N/A') AS matric_no
             FROM project_deliverables d
-            LEFT JOIN students s ON d.student_id = s.student_id
-            LEFT JOIN users u ON s.user_id = u.\`${idCol}\`
+            LEFT JOIN students s ON d.student_id = s.student_id OR d.student_id = s.user_id
+            LEFT JOIN users u ON s.user_id = u.user_id OR s.user_id = u.id
             ORDER BY d.deliverable_id DESC
         `);
-        res.json(docs);
+        res.json(rows);
     } catch (error) {
-        res.status(500).json({ error: 'Failed to load deliverables' });
+        console.error('DELIVERABLES FETCH ERROR:', error.message);
+        // Fallback to empty list so frontend remains responsive
+        res.json([]);
     }
 });
 

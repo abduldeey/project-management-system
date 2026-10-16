@@ -92,13 +92,14 @@ function App() {
     setLoading(true);
     try {
       const [propRes, deadRes, delivRes] = await Promise.all([
-        fetch(`${API_BASE}/proposals`),
+        fetch(`${API_BASE}/api/proposals`),
         fetch(`${API_BASE}/api/deadlines`),
         fetch(`${API_BASE}/api/deliverables`)
       ]);
-      const propData = await propRes.json();
-      const deadData = await deadRes.json();
-      const delivData = await delivRes.json();
+
+      const propData = propRes.ok ? await propRes.json() : [];
+      const deadData = deadRes.ok ? await deadRes.json() : [];
+      const delivData = delivRes.ok ? await delivRes.json() : [];
 
       setProposals(Array.isArray(propData) ? propData : []);
       setDeadlines(Array.isArray(deadData) ? deadData : []);
@@ -106,26 +107,27 @@ function App() {
 
       if (user?.userId) {
         const notifRes = await fetch(`${API_BASE}/api/notifications/${user.userId}`);
-        const nData = await notifRes.json();
+        const nData = notifRes.ok ? await notifRes.json() : [];
         setNotifications(Array.isArray(nData) ? nData : []);
       }
 
       const userRoleLower = user?.role?.toLowerCase();
-      if (userRoleLower === 'student' && user?.studentId) {
-        const gradeRes = await fetch(`${API_BASE}/api/grades/student/${user.studentId}`);
-        const gData = await gradeRes.json();
+      if (userRoleLower === 'student' && (user?.studentId || user?.userId)) {
+        const sid = user.studentId || user.userId;
+        const gradeRes = await fetch(`${API_BASE}/api/grades/student/${sid}`);
+        const gData = gradeRes.ok ? await gradeRes.json() : null;
         setStudentGrade(gData);
       }
 
       if (userRoleLower === 'supervisor' || userRoleLower === 'coordinator') {
         const gradesRes = await fetch(`${API_BASE}/api/grades`);
-        const gAll = await gradesRes.json();
+        const gAll = gradesRes.ok ? await gradesRes.json() : [];
         setAllGrades(Array.isArray(gAll) ? gAll : []);
       }
 
       if (userRoleLower === 'coordinator') {
         const allocRes = await fetch(`${API_BASE}/api/allocations`);
-        const aData = await allocRes.json();
+        const aData = allocRes.ok ? await allocRes.json() : { students: [], supervisors: [] };
         setAllocations(aData);
       }
     } catch (err) {
@@ -211,22 +213,28 @@ function App() {
     e.preventDefault();
     setIsProcessing(true);
     try {
+      const targetStudentId = user?.studentId || user?.student_id || user?.userId || user?.id;
+
       const res = await fetch(`${API_BASE}/api/proposals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...formData,
-          student_id: user.studentId
+          student_id: targetStudentId
         })
       });
+
+      const resData = await res.json();
 
       if (res.ok) {
         setFormData({ title: '', problem_statement: '', aim: '', objectives: '' });
         setShowSubmitModal(false);
-        fetchData();
+        await fetchData();
+      } else {
+        alert(resData.error || 'Submission error');
       }
     } catch (err) {
-      alert('Submission error');
+      alert('Network or server error during submission');
     } finally {
       setIsProcessing(false);
     }
