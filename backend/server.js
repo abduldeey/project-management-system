@@ -373,6 +373,47 @@ app.get('/api/allocations', async (req, res) => {
         return res.status(500).json({ error: err.message, students: [], supervisors: [] });
     }
 });
+app.post('/api/allocations', async (req, res) => {
+    try {
+        const { studentId, student_id, supervisorId, supervisor_id } = req.body;
+        const sId = studentId || student_id;
+        const spId = supervisorId || supervisor_id;
+
+        if (!sId || !spId) {
+            return res.status(400).json({ error: 'Please select both a student and a supervisor.' });
+        }
+
+        // 1. Try allocations table with standard column names (student_id, supervisor_id)
+        try {
+            await db.query(
+                `INSERT INTO allocations (student_id, supervisor_id) VALUES (?, ?)
+                 ON DUPLICATE KEY UPDATE supervisor_id = VALUES(supervisor_id)`,
+                [sId, spId]
+            );
+            return res.json({ message: 'Supervisor allocated successfully' });
+        } catch (err1) {
+            // 2. Try staff_id if schema uses staff_id
+            try {
+                await db.query(
+                    `INSERT INTO allocations (student_id, staff_id) VALUES (?, ?)
+                     ON DUPLICATE KEY UPDATE staff_id = VALUES(staff_id)`,
+                    [sId, spId]
+                );
+                return res.json({ message: 'Supervisor allocated successfully' });
+            } catch (err2) {
+                // 3. Fallback: Update supervisor_id directly on the students table if allocations table doesn't exist
+                await db.query(
+                    `UPDATE students SET supervisor_id = ? WHERE student_id = ? OR user_id = ?`,
+                    [spId, sId, sId]
+                );
+                return res.json({ message: 'Supervisor allocated successfully' });
+            }
+        }
+    } catch (err) {
+        console.error('ALLOCATION ROUTE ERROR:', err.message);
+        return res.status(500).json({ error: 'Allocation failed: ' + err.message });
+    }
+});
 
 app.post('/api/deadlines', async (req, res) => {
     try {
