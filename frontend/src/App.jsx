@@ -477,27 +477,6 @@ function App() {
   const filteredProposals = useMemo(() => {
     let list = proposals;
 
-    if (userRoleLower === 'student') {
-      const myId = user.studentId || user.userId || user.id;
-      const myMatric = (user.matricNo || user.matric_no || '').toLowerCase();
-
-      list = proposals.filter((p) => {
-        // Direct ID match
-        if (p.student_id && String(p.student_id) === String(myId)) return true;
-        if (p.user_id && String(p.user_id) === String(user.userId || user.id)) return true;
-        // Matric number match
-        if (myMatric && p.matric_no && p.matric_no.toLowerCase() === myMatric) return true;
-        // If this is the only proposal or student created it
-        if (!p.student_id && !p.matric_no) return true;
-        return false;
-      });
-
-      // Fail-safe: if the filter was too strict and returned empty, show all available proposals for now
-      if (list.length === 0 && proposals.length > 0) {
-        list = proposals;
-      }
-    }
-
     if (statusFilter !== 'ALL') {
       list = list.filter(p => p.status === statusFilter);
     }
@@ -507,13 +486,12 @@ function App() {
       list = list.filter(p =>
         (p.title && p.title.toLowerCase().includes(query)) ||
         (p.student_name && p.student_name.toLowerCase().includes(query)) ||
-        (p.matric_no && p.matric_no.toLowerCase().includes(query)) ||
-        (p.department && p.department.toLowerCase().includes(query))
+        (p.matric_no && p.matric_no.toLowerCase().includes(query))
       );
     }
 
     return list;
-  }, [proposals, user, statusFilter, searchQuery, userRoleLower]);
+  }, [proposals, statusFilter, searchQuery]);
 
   if (!user) {
     return (
