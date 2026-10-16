@@ -495,7 +495,10 @@ app.post('/api/deliverables', upload.single('file'), async (req, res) => {
         const body = req.body || {};
         const studentId = body.student_id || body.studentId;
         const chapterTitle = body.chapter_title || body.chapterTitle || 'Chapter Submission';
-        const fileUrl = req.file ? `/uploads/${req.file.filename}` : (body.file_url || 'uploaded_document.pdf');
+        
+        // Extract original name and storage path
+        const originalName = req.file ? req.file.originalname : 'document.pdf';
+        const fileUrl = req.file ? `/uploads/${req.file.filename}` : 'uploaded_document.pdf';
 
         if (!studentId) {
             return res.status(400).json({ error: 'Missing student identifier.' });
@@ -505,25 +508,27 @@ app.post('/api/deliverables', upload.single('file'), async (req, res) => {
         const [columns] = await db.query(`SHOW COLUMNS FROM deliverables`);
         const colNames = columns.map(c => c.Field);
 
-        // 2. Dynamically match columns present in the schema
+        // 2. Build insert payload dynamically matching your schema
         const insertData = {};
 
         // Student ID column mapping
         if (colNames.includes('student_id')) insertData['student_id'] = studentId;
         else if (colNames.includes('user_id')) insertData['user_id'] = studentId;
-        else if (colNames.includes('id') && !colNames.includes('deliverable_id')) insertData['id'] = studentId;
 
         // Chapter title column mapping
         if (colNames.includes('chapter_title')) insertData['chapter_title'] = chapterTitle;
         else if (colNames.includes('title')) insertData['title'] = chapterTitle;
-        else if (colNames.includes('chapter')) insertData['chapter'] = chapterTitle;
 
-        // File path/url column mapping
+        // File name column mapping (the exact required field)
+        if (colNames.includes('file_name')) insertData['file_name'] = originalName;
+        if (colNames.includes('filename')) insertData['filename'] = originalName;
+
+        // File path / url column mapping
         if (colNames.includes('file_url')) insertData['file_url'] = fileUrl;
         else if (colNames.includes('file_path')) insertData['file_path'] = fileUrl;
         else if (colNames.includes('file')) insertData['file'] = fileUrl;
 
-        // Status column mapping (if present)
+        // Status column mapping
         if (colNames.includes('status')) insertData['status'] = 'SUBMITTED';
 
         const keys = Object.keys(insertData);
