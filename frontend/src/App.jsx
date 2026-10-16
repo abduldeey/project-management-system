@@ -111,14 +111,12 @@ function App() {
         setNotifications(Array.isArray(nData) ? nData : []);
       }
 
-      const userRoleLower = (user?.role || '').toLowerCase();
-  const userEmail = (user?.email || '').toLowerCase();
+      const userEmail = (user?.email || '').toLowerCase();
   const isCoordinator = 
     userRoleLower === 'coordinator' || 
     userEmail.includes('coord') || 
     userEmail === 'maryamdalhatu@gmail.com';
   const isSupervisor = userRoleLower === 'supervisor' && !isCoordinator;
-      if (userRoleLower === 'student' && (user?.studentId || user?.userId)) {
         const sid = user.studentId || user.userId;
         const gradeRes = await fetch(`${API_BASE}/api/grades/student/${sid}`);
         const gData = gradeRes.ok ? await gradeRes.json() : null;
@@ -480,6 +478,13 @@ function App() {
     return deliverables;
   }, [deliverables, user, userRoleLower]);
 
+  const userRoleLower = (user?.role || '').toLowerCase();
+  const userEmail = (user?.email || '').toLowerCase();
+  const isCoordinator = 
+    userRoleLower === 'coordinator' || 
+    userEmail.includes('coord') || 
+    userEmail === 'maryamdalhatu@gmail.com';
+  const isSupervisor = userRoleLower === 'supervisor' && !isCoordinator;
   const filteredProposals = useMemo(() => {
     let list = proposals;
 
