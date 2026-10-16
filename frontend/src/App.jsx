@@ -112,8 +112,12 @@ function App() {
       }
 
       const userRoleLower = (user?.role || '').toLowerCase();
-const isCoordinator = userRoleLower === 'coordinator' || (user?.email && user.email.toLowerCase().includes('coord'));
-const isSupervisor = userRoleLower === 'supervisor' && !isCoordinator;
+  const userEmail = (user?.email || '').toLowerCase();
+  const isCoordinator = 
+    userRoleLower === 'coordinator' || 
+    userEmail.includes('coord') || 
+    userEmail === 'maryamdalhatu@gmail.com';
+  const isSupervisor = userRoleLower === 'supervisor' && !isCoordinator;
       if (userRoleLower === 'student' && (user?.studentId || user?.userId)) {
         const sid = user.studentId || user.userId;
         const gradeRes = await fetch(`${API_BASE}/api/grades/student/${sid}`);
@@ -697,8 +701,8 @@ const isSupervisor = userRoleLower === 'supervisor' && !isCoordinator;
             <div className="text-right">
               <div className="text-sm font-bold text-slate-900">{user.fullName || user.full_name}</div>
               <div className="text-xs text-slate-500 font-mono">
-                {isCoordinator ? 'COORDINATOR' : user.role?.toUpperCase()} {user.matricNo || user.matric_no ? `• ${user.matricNo || user.matric_no}` : ''}
-              </div>
+  {isCoordinator ? 'COORDINATOR' : (user?.role ? user.role.toUpperCase() : '')} {user?.matricNo || user?.matric_no ? `• ${user?.matricNo || user?.matric_no}` : ''}
+</div>
             </div>
 
             {(userRoleLower === 'coordinator' || userRoleLower === 'supervisor') && (
@@ -712,21 +716,21 @@ const isSupervisor = userRoleLower === 'supervisor' && !isCoordinator;
             )}
 
             {(userRoleLower === 'coordinator' || isCoordinator) && (
-              <>
-                <button
-                  onClick={() => setShowAllocateModal(true)}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition cursor-pointer"
-                >
-                  👥 Allocate
-                </button>
-                <button
-                  onClick={() => setShowDeadlineModal(true)}
-                  className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition cursor-pointer"
-                >
-                  + Set Deadline
-                </button>
-              </>
-            )}
+  <>
+    <button
+      onClick={() => setShowAllocateModal(true)}
+      className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition cursor-pointer"
+    >
+      👥 Allocate
+    </button>
+    <button
+      onClick={() => setShowDeadlineModal(true)}
+      className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium px-3.5 py-2 rounded-lg transition cursor-pointer"
+    >
+      + Set Deadline
+    </button>
+  </>
+)}
 
             {userRoleLower === 'student' && (
               <>
