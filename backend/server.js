@@ -20,6 +20,19 @@ if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
 }
 app.use('/uploads', express.static(uploadsDir));
+app.get('/api/test-uploads', (req, res) => {
+  try {
+    const files = fs.readdirSync(uploadsDir);
+    res.json({
+      success: true,
+      uploadsDirFullPath: uploadsDir,
+      totalFiles: files.length,
+      filesInsideFolder: files
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message, uploadsDirFullPath: uploadsDir });
+  }
+});
 
 // Multer Storage Configuration
 const storage = multer.diskStorage({
