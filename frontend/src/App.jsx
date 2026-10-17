@@ -600,10 +600,15 @@ export default function App() {
                             }}
                             className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded text-[11px] font-medium transition"
                           >
-                            Review / Grade
-                          </button>
-                        </td>
-                      )}
+                           <td className="py-2.5 px-3 text-indigo-600 underline">
+                        {d.file_url ? (
+                          <a href={d.file_url} target="_blank" rel="noreferrer">
+                            Download
+                          </a>
+                        ) : (
+                          'Uploaded'
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -915,7 +920,7 @@ export default function App() {
           </div>
         </div>
       )}
-      {/* REVIEW & GRADE MODAL */}
+    {/* REVIEW PROPOSAL MODAL */}
       {showReviewModal && selectedProposal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6 border border-slate-200">
@@ -930,27 +935,16 @@ export default function App() {
                   className="w-full px-3 py-2 border rounded-lg text-xs bg-white"
                 >
                   <option value="APPROVED">Approve</option>
-                  <option value="REJECTED">Reject / Revise</option>
+                  <option value="REJECTED">Reject / Needs Revision</option>
                   <option value="PENDING">Keep Pending</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Score / Grade (Optional)</label>
-                <input
-                  type="text"
-                  placeholder="e.g. 75 / 100 or A"
-                  value={reviewForm.score}
-                  onChange={(e) => setReviewForm({ ...reviewForm, score: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg text-xs"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Supervisor Remarks</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Supervisor Remarks & Feedback</label>
                 <textarea
                   rows="3"
-                  placeholder="Add feedback for the student..."
+                  placeholder="Provide comments or revision notes for the student..."
                   value={reviewForm.remarks}
                   onChange={(e) => setReviewForm({ ...reviewForm, remarks: e.target.value })}
                   className="w-full px-3 py-2 border rounded-lg text-xs"
@@ -973,13 +967,14 @@ export default function App() {
                   disabled={isProcessing}
                   className="px-4 py-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium"
                 >
-                  {isProcessing ? 'Saving...' : 'Submit Review'}
+                  {isProcessing ? 'Saving...' : 'Submit Decision'}
                 </button>
               </div>
             </form>
           </div>
         </div>
-      )}
+      )}  
+  
     </div>
   );
 }

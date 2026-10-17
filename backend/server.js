@@ -904,18 +904,30 @@ app.post('/api/proposals/:id/review', async (req, res) => {
 app.put('/api/proposals/:id/review', async (req, res) => {
     try {
         const { id } = req.params;
-        const { status, remarks, score } = req.body;
+        const { status, remarks } = req.body;
 
-        await db.query(
-            `UPDATE proposals SET status = ?, remarks = ?, score = ? WHERE proposal_id = ? OR id = ?`,
-            [status || 'APPROVED', remarks || null, score || null, id, id]
-        ).catch(async () => {
-            // Fallback if score/remarks columns aren't in proposals table
-            await db.query(
-                `UPDATE proposals SET status = ? WHERE proposal_id = ? OR id = ?`,
-                [status || 'APPROVED', id, id]
-            );
-        });
+        // 1. Inspect table columns
+        const [columns] = await db.query(`SHOW COLUMNS FROM proposals`);
+        const colNames = columns.map(c => c.Field);
+
+        const primaryCol = colNames.includes('id') ? 'id' : 'proposal_id';
+        const updates = ['status = ?'];
+        const values = [status || 'APPROVED'];
+
+        if (colNames.includes('remarks')) {
+            updates.push('remarks = ?');
+            values.push(remarks || null);
+        } else if (colNames.includes('comments')) {
+            updates.push('comments = ?');
+            values.push(remarks || null);
+        } else if (colNames.includes('feedback')) {
+            updates.push('feedback = ?');
+            values.push(remarks || null);
+        }
+
+        values.push(id);
+        const sql = `UPDATE proposals SET ${updates.join(', ')} WHERE ${primaryCol} = ?`;
+        await db.query(sql, values);
 
         return res.json({ message: 'Proposal review updated successfully' });
     } catch (err) {
