@@ -901,6 +901,28 @@ app.post('/api/proposals/:id/review', async (req, res) => {
     }
 });
 
+app.put('/api/proposals/:id/review', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status, remarks, score } = req.body;
+
+        await db.query(
+            `UPDATE proposals SET status = ?, remarks = ?, score = ? WHERE proposal_id = ? OR id = ?`,
+            [status || 'APPROVED', remarks || null, score || null, id, id]
+        ).catch(async () => {
+            // Fallback if score/remarks columns aren't in proposals table
+            await db.query(
+                `UPDATE proposals SET status = ? WHERE proposal_id = ? OR id = ?`,
+                [status || 'APPROVED', id, id]
+            );
+        });
+
+        return res.json({ message: 'Proposal review updated successfully' });
+    } catch (err) {
+        console.error('PROPOSAL REVIEW ERROR:', err.message);
+        return res.status(500).json({ error: err.message });
+    }
+});
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);

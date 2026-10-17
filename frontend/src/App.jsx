@@ -35,6 +35,36 @@ export default function App() {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [showDeadlineModal, setShowDeadlineModal] = useState(false);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [selectedProposal, setSelectedProposal] = useState(null);
+  const [reviewForm, setReviewForm] = useState({ status: 'APPROVED', remarks: '', score: '' });
+
+  const handleReviewSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedProposal) return;
+    setIsProcessing(true);
+    try {
+      const pId = selectedProposal.proposal_id || selectedProposal.id;
+      const res = await fetch(`${API_BASE}/api/proposals/${pId}/review`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reviewForm)
+      });
+      if (res.ok) {
+        alert('Proposal reviewed successfully!');
+        setShowReviewModal(false);
+        setSelectedProposal(null);
+        await fetchData();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert('Review update failed: ' + (data.error || res.statusText));
+      }
+    } catch (err) {
+      alert('Error updating proposal: ' + err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   // Forms
   const [formData, setFormData] = useState({
@@ -533,29 +563,47 @@ export default function App() {
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-100 text-slate-600 uppercase tracking-wider text-[11px]">
-                    <th className="py-2.5 px-3">Chapter</th>
-                    <th className="py-2.5 px-3">Student</th>
-                    <th className="py-2.5 px-3">Submitted</th>
-                    <th className="py-2.5 px-3">File</th>
+                    <th className="py-3 px-4">Title</th>
+                    <th className="py-3 px-4">Student</th>
+                    <th className="py-3 px-4">Matric No</th>
+                    <th className="py-3 px-4">Status</th>
+                    {(isSupervisor || isCoordinator) && <th className="py-3 px-4 text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {deliverables.map((d, idx) => (
-                    <tr key={d.deliverable_id || d.id || idx} className="hover:bg-slate-50/50">
-                      <td className="py-2.5 px-3 font-medium text-slate-900">{d.chapter_title}</td>
-                      <td className="py-2.5 px-3">{d.student_name} ({d.matric_no || 'N/A'})</td>
-                      <td className="py-2.5 px-3 text-slate-500">
-                        {d.created_at ? new Date(d.created_at).toLocaleDateString() : 'Recent'}
+                  {filteredProposals.map((prop, idx) => (
+                    <tr key={prop.proposal_id || prop.id || idx} className="hover:bg-slate-50/50">
+                      <td className="py-3 px-4 font-medium text-slate-900">{prop.title}</td>
+                      <td className="py-3 px-4">{prop.student_name || 'Student'}</td>
+                      <td className="py-3 px-4 font-mono">{prop.matric_no || 'N/A'}</td>
+                      <td className="py-3 px-4">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                          prop.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' :
+                          prop.status === 'REJECTED' ? 'bg-rose-100 text-rose-700' :
+                          'bg-blue-100 text-blue-700'
+                        }`}>
+                          {prop.status || 'PENDING'}
+                        </span>
                       </td>
-                      <td className="py-2.5 px-3 text-indigo-600 underline">
-                        {d.file_url ? (
-                          <a href={d.file_url} target="_blank" rel="noreferrer">
-                            Download
-                          </a>
-                        ) : (
-                          'Uploaded'
-                        )}
-                      </td>
+                      {(isSupervisor || isCoordinator) && (
+                        <td className="py-3 px-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedProposal(prop);
+                              setReviewForm({
+                                status: prop.status && prop.status !== 'PENDING' ? prop.status : 'APPROVED',
+                                remarks: prop.remarks || '',
+                                score: prop.score || ''
+                              });
+                              setShowReviewModal(true);
+                            }}
+                            className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded text-[11px] font-medium transition"
+                          >
+                            Review / Grade
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -861,6 +909,71 @@ export default function App() {
                   className="px-4 py-2 text-xs bg-purple-600 text-white rounded-lg font-medium"
                 >
                   {isProcessing ? 'Saving...' : 'Set Deadline'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* REVIEW & GRADE MODAL */}
+      {showReviewModal && selectedProposal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6 border border-slate-200">
+            <h3 className="text-base font-bold text-slate-800 mb-1">Review Proposal</h3>
+            <p className="text-xs text-slate-500 mb-4 truncate">{selectedProposal.title}</p>
+            <form onSubmit={handleReviewSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Decision</label>
+                <select
+                  value={reviewForm.status}
+                  onChange={(e) => setReviewForm({ ...reviewForm, status: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg text-xs bg-white"
+                >
+                  <option value="APPROVED">Approve</option>
+                  <option value="REJECTED">Reject / Revise</option>
+                  <option value="PENDING">Keep Pending</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Score / Grade (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 75 / 100 or A"
+                  value={reviewForm.score}
+                  onChange={(e) => setReviewForm({ ...reviewForm, score: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Supervisor Remarks</label>
+                <textarea
+                  rows="3"
+                  placeholder="Add feedback for the student..."
+                  value={reviewForm.remarks}
+                  onChange={(e) => setReviewForm({ ...reviewForm, remarks: e.target.value })}
+                  className="w-full px-3 py-2 border rounded-lg text-xs"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowReviewModal(false);
+                    setSelectedProposal(null);
+                  }}
+                  className="px-4 py-2 text-xs border rounded-lg text-slate-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isProcessing}
+                  className="px-4 py-2 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium"
+                >
+                  {isProcessing ? 'Saving...' : 'Submit Review'}
                 </button>
               </div>
             </form>
