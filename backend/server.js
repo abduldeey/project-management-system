@@ -20,6 +20,28 @@ if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
 }
 app.use('/uploads', express.static(uploadsDir));
+// Ensure uploads folder exists
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadsDir));
+
+// --- PASTE THIS NEW BLOCK RIGHT HERE ---
+app.get('/uploads/:filename', (req, res) => {
+  const filePath = path.join(uploadsDir, req.params.filename);
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({
+      status: 'File Missing',
+      message: 'This file does not exist on the server disk. If Render restarted, local uploads were wiped.',
+      searchedPath: filePath
+    });
+  }
+
+  res.sendFile(filePath);
+});
+
 app.get('/api/test-uploads', (req, res) => {
   try {
     const files = fs.readdirSync(uploadsDir);
