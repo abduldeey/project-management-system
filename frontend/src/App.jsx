@@ -578,14 +578,18 @@ export default function App() {
                         {d.created_at ? new Date(d.created_at).toLocaleDateString() : 'Recent'}
                       </td>
                       <td className="py-2.5 px-3 text-indigo-600 underline">
-                        {d.file_url ? (
-                          <a href={d.file_url} target="_blank" rel="noreferrer">
-                            Download
-                          </a>
-                        ) : (
-                          'Uploaded'
-                        )}
-                      </td>
+  {d.file_url ? (
+    <a 
+      href={d.file_url.startsWith('http') ? d.file_url : `${API_BASE}${d.file_url.startsWith('/') ? '' : '/'}${d.file_url}`} 
+      target="_blank" 
+      rel="noreferrer"
+    >
+      Download
+    </a>
+  ) : (
+    <span>No file</span>
+  )}
+</td>
                     </tr>
                   ))}
                 </tbody>
