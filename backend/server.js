@@ -41,6 +41,7 @@ app.get('/uploads/:filename', (req, res) => {
 
   res.sendFile(filePath);
 });
+// ---------------------------------------
 
 app.get('/api/test-uploads', (req, res) => {
   try {
