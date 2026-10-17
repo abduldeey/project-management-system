@@ -1,5 +1,5 @@
-const express = require('express');
-const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
@@ -21,13 +21,14 @@ if (!fs.existsSync(uploadsDir)) {
 }
 app.use('/uploads', express.static(uploadsDir));
 // Ensure uploads folder exists
+// Ensure uploads folder exists (declared ONLY ONCE)
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
 }
 app.use('/uploads', express.static(uploadsDir));
 
-// --- PASTE THIS NEW BLOCK RIGHT HERE ---
+// Route to handle downloads and diagnose missing files
 app.get('/uploads/:filename', (req, res) => {
   const filePath = path.join(uploadsDir, req.params.filename);
 
