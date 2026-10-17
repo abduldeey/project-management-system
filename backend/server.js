@@ -1,10 +1,10 @@
+const express = require('express');
+const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 require('dotenv').config();
 const db = require('./db');
 
@@ -14,14 +14,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'university_project_management_secr
 app.use(cors());
 app.use(express.json());
 
-// Ensure uploads folder exists
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-}
-app.use('/uploads', express.static(uploadsDir));
-// Ensure uploads folder exists
-// Ensure uploads folder exists (declared ONLY ONCE)
+// Ensure uploads folder exists (declared once)
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
@@ -30,32 +23,31 @@ app.use('/uploads', express.static(uploadsDir));
 
 // Route to handle downloads and diagnose missing files
 app.get('/uploads/:filename', (req, res) => {
-  const filePath = path.join(uploadsDir, req.params.filename);
+    const filePath = path.join(uploadsDir, req.params.filename);
 
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).json({
-      status: 'File Missing',
-      message: 'This file does not exist on the server disk. If Render restarted, local uploads were wiped.',
-      searchedPath: filePath
-    });
-  }
+    if (!fs.existsSync(filePath)) {
+        return res.status(404).json({
+            status: 'File Missing',
+            message: 'This file does not exist on the server disk. If Render restarted, local uploads were wiped.',
+            searchedPath: filePath
+        });
+    }
 
-  res.sendFile(filePath);
+    res.sendFile(filePath);
 });
-// ---------------------------------------
 
 app.get('/api/test-uploads', (req, res) => {
-  try {
-    const files = fs.readdirSync(uploadsDir);
-    res.json({
-      success: true,
-      uploadsDirFullPath: uploadsDir,
-      totalFiles: files.length,
-      filesInsideFolder: files
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message, uploadsDirFullPath: uploadsDir });
-  }
+    try {
+        const files = fs.readdirSync(uploadsDir);
+        res.json({
+            success: true,
+            uploadsDirFullPath: uploadsDir,
+            totalFiles: files.length,
+            filesInsideFolder: files
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message, uploadsDirFullPath: uploadsDir });
+    }
 });
 
 // Multer Storage Configuration
@@ -140,13 +132,14 @@ async function smartInsert(connection, tableName, customData) {
         `);
 
         await db.query(`
-            CREATE TABLE IF NOT EXISTS project_deliverables (
-                deliverable_id INT AUTO_INCREMENT PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS deliverables (
+                id INT AUTO_INCREMENT PRIMARY KEY,
                 student_id INT NOT NULL,
-                chapter_title VARCHAR(100) NOT NULL,
+                chapter_title VARCHAR(255) NOT NULL,
                 file_name VARCHAR(255) NOT NULL,
-                file_url VARCHAR(255) NOT NULL,
-                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                file_url VARCHAR(255),
+                status VARCHAR(50) DEFAULT 'SUBMITTED',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB;
         `);
 
@@ -174,23 +167,11 @@ async function smartInsert(connection, tableName, customData) {
             ) ENGINE=InnoDB;
         `);
 
-        try {
-            const [pvCols] = await db.query(`SHOW COLUMNS FROM proposal_versions`);
-            const colNames = pvCols.map(c => c.Field);
-            if (!colNames.includes('feedback_notes')) {
-                await db.query(`ALTER TABLE proposal_versions ADD COLUMN feedback_notes TEXT NULL`);
-            }
-        } catch (pvErr) {
-            console.log('proposal_versions check skipped:', pvErr.message);
-        }
-
-        console.log('All auxiliary tables verified/created successfully.');
+        console.log('All database tables verified/created successfully.');
     } catch (e) {
         console.error('Table init error:', e.message);
     }
 })();
-
-// --- 1. USER AUTHENTICATION ---
 
 // --- 1. USER AUTHENTICATION ---
 
@@ -207,21 +188,16 @@ app.post('/api/auth/register', async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        // 1. Ensure the 'role' column accepts VARCHAR or includes COORDINATOR
         try {
             await connection.query(`ALTER TABLE users MODIFY COLUMN role VARCHAR(50) DEFAULT 'STUDENT'`);
-        } catch (alterErr) {
-            // Ignore if already altered or restricted
-        }
+        } catch (alterErr) {}
 
         const hashedPassword = await bcrypt.hash(password, 10);
         const derivedUsername = email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '') + '_' + Date.now().toString().slice(-4);
 
-        // Fallback for role value if ENUM is still restrictive: map COORDINATOR to SUPERVISOR at user level
-        // Designation in staff table will maintain true coordinator identity
         let userTableRole = requestedRole;
         if (requestedRole === 'COORDINATOR') {
-            userTableRole = 'SUPERVISOR'; // Compatible with standard ENUM('STUDENT','SUPERVISOR')
+            userTableRole = 'SUPERVISOR';
         }
 
         const [userResult] = await smartInsert(connection, 'users', {
@@ -300,7 +276,6 @@ app.post('/api/auth/login', async (req, res) => {
         let matricNo = null;
         let department = 'Computer Science';
 
-        // 1. Check Student record
         try {
             const [studentRows] = await db.query(
                 `SELECT * FROM students WHERE user_id = ? OR id = ? LIMIT 1`,
@@ -315,7 +290,6 @@ app.post('/api/auth/login', async (req, res) => {
             }
         } catch (e) {}
 
-        // 2. Check Staff record
         try {
             const [staffRows] = await db.query(
                 `SELECT * FROM staff WHERE user_id = ? OR id = ? LIMIT 1`,
@@ -326,7 +300,6 @@ app.post('/api/auth/login', async (req, res) => {
                 staffId = st.staff_id || st.id;
                 if (st.department) department = st.department;
                 
-                // If staff designation mentions coordinator, or the user table says coordinator
                 if (
                     (st.designation && st.designation.toLowerCase().includes('coordinator')) ||
                     role === 'COORDINATOR'
@@ -338,7 +311,6 @@ app.post('/api/auth/login', async (req, res) => {
             }
         } catch (e) {}
 
-        // Bulletproof override: if email has "coord" in it, ALWAYS make them a coordinator
         if (user.email && user.email.toLowerCase().includes('coord')) {
             role = 'COORDINATOR';
         }
@@ -373,7 +345,6 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/allocations', async (req, res) => {
     try {
-        // Query all users to inspect and categorize safely
         const [allUsers] = await db.query(`SELECT * FROM users`);
         
         const students = [];
@@ -383,7 +354,6 @@ app.get('/api/allocations', async (req, res) => {
             const r = (u.role || '').toString().toLowerCase().trim();
             const email = (u.email || '').toString().toLowerCase().trim();
             
-            // Skip the coordinator herself
             if (r.includes('coord') || email === 'maryamdalhatu@gmail.com') {
                 return;
             }
@@ -399,7 +369,6 @@ app.get('/api/allocations', async (req, res) => {
             if (r.includes('super') || r.includes('lect') || r.includes('facul')) {
                 supervisors.push(cleanUser);
             } else {
-                // Anyone else that is not coordinator or supervisor defaults to student
                 students.push(cleanUser);
             }
         });
@@ -410,6 +379,7 @@ app.get('/api/allocations', async (req, res) => {
         return res.status(500).json({ error: err.message, students: [], supervisors: [] });
     }
 });
+
 app.post('/api/allocations', async (req, res) => {
     try {
         const { studentId, student_id, supervisorId, supervisor_id } = req.body;
@@ -420,7 +390,6 @@ app.post('/api/allocations', async (req, res) => {
             return res.status(400).json({ error: 'Please select both a student and a supervisor.' });
         }
 
-        // 1. Ensure allocations table exists
         await db.query(`
             CREATE TABLE IF NOT EXISTS allocations (
                 allocation_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -430,7 +399,6 @@ app.post('/api/allocations', async (req, res) => {
             )
         `).catch(() => {});
 
-        // 2. Insert into allocations table
         try {
             await db.query(
                 `INSERT INTO allocations (student_id, supervisor_id) VALUES (?, ?)`,
@@ -443,7 +411,6 @@ app.post('/api/allocations', async (req, res) => {
                     [sId, spId]
                 );
             } catch (err2) {
-                // Table might use user_id
                 await db.query(
                     `INSERT INTO allocations (user_id, supervisor_id) VALUES (?, ?)`,
                     [sId, spId]
@@ -451,7 +418,6 @@ app.post('/api/allocations', async (req, res) => {
             }
         }
 
-        // 3. Fallback: Update students table safely using user_id or id
         try {
             await db.query(`UPDATE students SET supervisor_id = ? WHERE user_id = ?`, [spId, sId]);
         } catch (e1) {
@@ -467,41 +433,6 @@ app.post('/api/allocations', async (req, res) => {
     }
 });
 
-app.post('/api/deadlines', async (req, res) => {
-    try {
-        const { title, due_date, deadline_date, description } = req.body;
-        let d = due_date || deadline_date;
-
-        if (!title || !d) {
-            return res.status(400).json({ error: 'Title and date are required.' });
-        }
-
-        // Convert DD/MM/YYYY if sent by local browser inputs
-        if (typeof d === 'string' && d.includes('/')) {
-            const parts = d.split('/');
-            if (parts.length === 3) {
-                d = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-            }
-        }
-
-        try {
-            await db.query(
-                `INSERT INTO deadlines (title, deadline_date, description) VALUES (?, ?, ?)`,
-                [title, d, description || '']
-            );
-            return res.json({ message: 'Deadline established successfully' });
-        } catch (e1) {
-            await db.query(
-                `INSERT INTO deadlines (title, due_date, description) VALUES (?, ?, ?)`,
-                [title, d, description || '']
-            );
-            return res.json({ message: 'Deadline established successfully' });
-        }
-    } catch (err) {
-        console.error('DEADLINE POST ERROR:', err.message);
-        return res.status(500).json({ error: err.message });
-    }
-});
 // --- 3. NOTIFICATIONS ---
 
 app.get('/api/notifications/:userId', async (req, res) => {
@@ -533,7 +464,6 @@ app.post('/api/deliverables', upload.single('file'), async (req, res) => {
         const studentId = body.student_id || body.studentId;
         const chapterTitle = body.chapter_title || body.chapterTitle || 'Chapter Submission';
         
-        // Extract original name and storage path
         const originalName = req.file ? req.file.originalname : 'document.pdf';
         const fileUrl = req.file ? `/uploads/${req.file.filename}` : 'uploaded_document.pdf';
 
@@ -541,31 +471,24 @@ app.post('/api/deliverables', upload.single('file'), async (req, res) => {
             return res.status(400).json({ error: 'Missing student identifier.' });
         }
 
-        // 1. Inspect the real columns in the deliverables table
         const [columns] = await db.query(`SHOW COLUMNS FROM deliverables`);
         const colNames = columns.map(c => c.Field);
 
-        // 2. Build insert payload dynamically matching your schema
         const insertData = {};
 
-        // Student ID column mapping
         if (colNames.includes('student_id')) insertData['student_id'] = studentId;
         else if (colNames.includes('user_id')) insertData['user_id'] = studentId;
 
-        // Chapter title column mapping
         if (colNames.includes('chapter_title')) insertData['chapter_title'] = chapterTitle;
         else if (colNames.includes('title')) insertData['title'] = chapterTitle;
 
-        // File name column mapping (the exact required field)
         if (colNames.includes('file_name')) insertData['file_name'] = originalName;
         if (colNames.includes('filename')) insertData['filename'] = originalName;
 
-        // File path / url column mapping
         if (colNames.includes('file_url')) insertData['file_url'] = fileUrl;
         else if (colNames.includes('file_path')) insertData['file_path'] = fileUrl;
         else if (colNames.includes('file')) insertData['file'] = fileUrl;
 
-        // Status column mapping
         if (colNames.includes('status')) insertData['status'] = 'SUBMITTED';
 
         const keys = Object.keys(insertData);
@@ -594,7 +517,6 @@ app.get('/api/deliverables', async (req, res) => {
             LEFT JOIN students s ON d.student_id = s.user_id OR d.student_id = s.id
             ORDER BY d.created_at DESC
         `).catch(async () => {
-            // Fallback if joined tables differ
             const [simpleRows] = await db.query(`SELECT * FROM deliverables ORDER BY id DESC`);
             return [simpleRows];
         });
@@ -603,47 +525,6 @@ app.get('/api/deliverables', async (req, res) => {
     } catch (err) {
         console.error('DELIVERABLES FETCH ERROR:', err.message);
         return res.json([]);
-    }
-});
-app.post('/api/deliverables', async (req, res) => {
-    try {
-        const studentId = req.body.student_id || req.body.studentId;
-        const chapterTitle = req.body.chapter_title || req.body.chapterTitle || 'Chapter Submission';
-        const fileUrl = req.file ? req.file.path : (req.body.file_url || 'uploaded_document.pdf');
-
-        if (!studentId) {
-            return res.status(400).json({ error: 'Missing student ID.' });
-        }
-
-        // Auto-create table if missing
-        await db.query(`
-            CREATE TABLE IF NOT EXISTS deliverables (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                student_id INT NOT NULL,
-                chapter_title VARCHAR(255) NOT NULL,
-                file_url VARCHAR(255),
-                status VARCHAR(50) DEFAULT 'SUBMITTED',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        `).catch(() => {});
-
-        // Insert submission record
-        try {
-            await db.query(
-                `INSERT INTO deliverables (student_id, chapter_title, file_url) VALUES (?, ?, ?)`,
-                [studentId, chapterTitle, fileUrl]
-            );
-        } catch (e1) {
-            await db.query(
-                `INSERT INTO deliverables (user_id, chapter_title, file_url) VALUES (?, ?, ?)`,
-                [studentId, chapterTitle, fileUrl]
-            );
-        }
-
-        return res.json({ message: 'Chapter uploaded successfully!' });
-    } catch (err) {
-        console.error('DELIVERABLES UPLOAD CRASH:', err.message);
-        return res.status(500).json({ error: err.message });
     }
 });
 
@@ -661,30 +542,35 @@ app.get('/api/deadlines', async (req, res) => {
 app.post('/api/deadlines', async (req, res) => {
     try {
         const { title, due_date, deadline_date, description } = req.body;
-        const targetDate = due_date || deadline_date;
+        let d = due_date || deadline_date;
 
-        if (!title || !targetDate) {
-            return res.status(400).json({ error: 'Title and due date are required.' });
+        if (!title || !d) {
+            return res.status(400).json({ error: 'Title and date are required.' });
         }
 
-        // Try standard schema columns first
+        if (typeof d === 'string' && d.includes('/')) {
+            const parts = d.split('/');
+            if (parts.length === 3) {
+                d = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+            }
+        }
+
         try {
             await db.query(
-                `INSERT INTO deadlines (title, deadline_date, description) VALUES (?, ?, ?)`,
-                [title, targetDate, description || '']
+                `INSERT INTO project_deadlines (title, deadline_date, description) VALUES (?, ?, ?)`,
+                [title, d, description || '']
             );
-            return res.json({ message: 'Deadline created successfully' });
-        } catch (colErr) {
-            // Fallback if column is named due_date
+            return res.json({ message: 'Deadline established successfully' });
+        } catch (e1) {
             await db.query(
                 `INSERT INTO deadlines (title, due_date, description) VALUES (?, ?, ?)`,
-                [title, targetDate, description || '']
+                [title, d, description || '']
             );
-            return res.json({ message: 'Deadline created successfully' });
+            return res.json({ message: 'Deadline established successfully' });
         }
     } catch (err) {
-        console.error('DEADLINE INSERT ERROR:', err.message);
-        return res.status(500).json({ error: 'Failed to create deadline: ' + err.message });
+        console.error('DEADLINE POST ERROR:', err.message);
+        return res.status(500).json({ error: err.message });
     }
 });
 
@@ -779,7 +665,6 @@ app.get('/api/proposals', async (req, res) => {
     try {
         const [rows] = await db.query(`SELECT * FROM proposals ORDER BY 1 DESC`);
         
-        // Enrich rows with default display values if user/student joins are empty
         const enriched = rows.map(r => ({
             ...r,
             proposal_id: r.proposal_id || r.id,
@@ -817,24 +702,21 @@ app.post('/api/proposals', async (req, res) => {
     }
 
     try {
-        // 1. Inspect existing columns in the proposals table
         const [columns] = await db.query(`SHOW COLUMNS FROM proposals`);
         const existingColNames = columns.map(c => c.Field.toLowerCase());
 
-        // 2. Prepare all possible column-value candidates
         const candidates = {
             title: title.trim(),
             project_title: title.trim(),
             problem_statement: problem_statement || '',
             aim: aim || '',
             objectives: objectives || '',
-            status: 'PENDING', // Default to PENDING to avoid ENUM truncation
+            status: 'PENDING',
             student_id: student_id || 1,
             user_id: student_id || 1,
             created_at: new Date()
         };
 
-        // 3. Match only columns that actually exist in the database table
         const insertKeys = [];
         const insertVals = [];
 
@@ -846,13 +728,11 @@ app.post('/api/proposals', async (req, res) => {
         }
 
         if (insertKeys.length === 0) {
-            // Absolute emergency fallback: insert into the very first non-id column
             const targetCol = existingColNames.find(c => !c.includes('id')) || existingColNames[0];
             const [fallback] = await db.query(`INSERT INTO proposals (${targetCol}) VALUES (?)`, [title.trim()]);
             return res.status(201).json({ message: 'Proposal submitted successfully', proposal_id: fallback.insertId });
         }
 
-        // 4. Build dynamic parameter placeholders (?, ?, ?)
         const placeholders = insertKeys.map(() => '?').join(', ');
         const query = `INSERT INTO proposals (${insertKeys.join(', ')}) VALUES (${placeholders})`;
 
@@ -868,82 +748,12 @@ app.post('/api/proposals', async (req, res) => {
     }
 });
 
-app.post('/api/proposals/:id/resubmit', async (req, res) => {
-    const proposalId = req.params.id;
-    const { title, problem_statement, aim, objectives } = req.body;
-
-    try {
-        const [latest] = await db.query(
-            `SELECT MAX(version_number) AS max_v FROM proposal_versions WHERE proposal_id = ?`,
-            [proposalId]
-        );
-        const nextVersion = (latest[0].max_v || 1) + 1;
-
-        await smartInsert(db, 'proposal_versions', {
-            proposal_id: proposalId,
-            version_number: nextVersion,
-            title,
-            problem_statement,
-            aim,
-            objectives
-        });
-
-        await db.query(
-            `UPDATE proposals SET title = ?, status = 'SUBMITTED', updated_at = NOW() WHERE proposal_id = ?`,
-            [title, proposalId]
-        );
-
-        res.json({ message: `Version ${nextVersion} submitted successfully!` });
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to submit revision' });
-    }
-});
-
-app.post('/api/proposals/:id/review', async (req, res) => {
-    const proposalId = req.params.id;
-    let { status, feedback_notes } = req.body;
-
-    if (status === 'CORRECTIONS_REQUIRED' || status === 'CORRECTION_REQUIRED') {
-        status = 'UNDER_REVIEW';
-    }
-
-    try {
-        await db.query(
-            `UPDATE proposals SET status = ?, updated_at = NOW() WHERE proposal_id = ?`,
-            [status, proposalId]
-        );
-
-        await db.query(
-            `UPDATE proposal_versions SET feedback_notes = ? 
-             WHERE proposal_id = ? 
-             ORDER BY version_number DESC LIMIT 1`,
-            [feedback_notes || 'No remarks added.', proposalId]
-        );
-
-        const [owner] = await db.query(
-            `SELECT s.user_id, p.title FROM proposals p JOIN students s ON p.student_id = s.student_id WHERE p.proposal_id = ?`,
-            [proposalId]
-        );
-
-        if (owner.length > 0) {
-            await db.query(
-                `INSERT INTO system_notifications (user_id, message) VALUES (?, ?)`,
-                [owner[0].user_id, `Your project proposal "${owner[0].title}" has been updated to ${status}.`]
-            );
-        }
-
-        res.json({ message: `Review saved and student notified.` });
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to save review' });
-    }
-});
-
+// Single unified proposal review handler
 app.put('/api/proposals/:id/review', async (req, res) => {
     try {
         const { id } = req.params;
         const { status, remarks } = req.body;
 
-        // 1. Inspect table columns
         const [columns] = await db.query(`SHOW COLUMNS FROM proposals`);
         const colNames = columns.map(c => c.Field);
 
@@ -972,6 +782,7 @@ app.put('/api/proposals/:id/review', async (req, res) => {
         return res.status(500).json({ error: err.message });
     }
 });
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
