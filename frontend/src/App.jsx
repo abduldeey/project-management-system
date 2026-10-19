@@ -37,6 +37,7 @@ export default function App() {
   const [showDeadlineModal, setShowDeadlineModal] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [showGradeModal, setShowGradeModal] = useState(false);
+  const [studentGrade, setStudentGrade] = useState(null);
   const [selectedStudentForGrading, setSelectedStudentForGrading] = useState(null);
   const [gradeForm, setGradeForm] = useState({
     documentation_score: '',
@@ -180,6 +181,18 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+    // Fetch student grade if logged-in user is a student
+      if (user?.role === 'STUDENT' && (user?.studentId || user?.userId)) {
+        try {
+          const gRes = await fetch(`${API_BASE}/api/grades/student/${user.studentId || user.userId}`);
+          if (gRes.ok) {
+            const gData = await gRes.json();
+            setStudentGrade(gData);
+          }
+        } catch (gErr) {
+          console.error('Error loading grade:', gErr);
+        }
+      }
   };
 
   useEffect(() => {
@@ -553,6 +566,54 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full space-y-6">
+        {/* Student Defense Grade Card */}
+        {isStudent && studentGrade && (
+          <section className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl p-5 shadow-sm">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+              <div>
+                <span className="text-[10px] uppercase tracking-wider font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full">
+                  Official Defense Evaluation
+                </span>
+                <h3 className="text-sm font-bold text-slate-800 mt-2">Final Project Grade & Defense Score</h3>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Graded by: <span className="font-semibold">{studentGrade.grader_name || 'Project Committee'}</span>
+                </p>
+              </div>
+              <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-lg border border-emerald-200 shadow-xs">
+                <div className="text-right">
+                  <div className="text-[11px] text-slate-500">Overall Score</div>
+                  <div className="text-base font-bold text-slate-800">{studentGrade.total_score}%</div>
+                </div>
+                <div className="w-10 h-10 rounded-full bg-emerald-600 text-white font-extrabold flex items-center justify-center text-lg shadow-sm">
+                  {studentGrade.letter_grade}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-4 pt-3 border-t border-emerald-200/60 text-xs">
+              <div className="bg-white/80 p-2.5 rounded border border-emerald-100">
+                <span className="text-slate-500 text-[11px]">Documentation:</span>
+                <span className="font-bold text-slate-800 ml-1">{studentGrade.documentation_score} / 30</span>
+              </div>
+              <div className="bg-white/80 p-2.5 rounded border border-emerald-100">
+                <span className="text-slate-500 text-[11px]">Implementation:</span>
+                <span className="font-bold text-slate-800 ml-1">{studentGrade.implementation_score} / 50</span>
+              </div>
+              <div className="bg-white/80 p-2.5 rounded border border-emerald-100">
+                <span className="text-slate-500 text-[11px]">Presentation:</span>
+                <span className="font-bold text-slate-800 ml-1">{studentGrade.presentation_score} / 20</span>
+              </div>
+            </div>
+
+            {studentGrade.remarks && (
+              <p className="text-xs text-slate-700 bg-white/70 p-2.5 rounded border border-emerald-100 mt-3 italic">
+                "{studentGrade.remarks}"
+              </p>
+            )}
+          </section>
+        )}
+
+        {/* Deadlines Section */}
         {/* Deadlines Section */}
         <section className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
           <h2 className="text-sm font-bold text-slate-800 mb-3">Project Deadlines</h2>

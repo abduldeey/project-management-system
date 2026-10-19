@@ -612,12 +612,21 @@ app.get('/api/grades', async (req, res) => {
 
 app.get('/api/grades/student/:studentId', async (req, res) => {
     try {
+        const { studentId } = req.params;
         const [grades] = await db.query(
-            `SELECT * FROM project_grades WHERE student_id = ?`,
-            [req.params.studentId]
+            `SELECT g.*, u.full_name AS grader_name 
+             FROM project_grades g
+             LEFT JOIN staff st ON g.graded_by = st.staff_id OR g.graded_by = st.id
+             LEFT JOIN users u ON st.user_id = u.id OR st.user_id = u.user_id
+             WHERE g.student_id = ? 
+                OR g.student_id = (SELECT student_id FROM students WHERE user_id = ? LIMIT 1)
+                OR g.student_id = (SELECT user_id FROM students WHERE student_id = ? LIMIT 1)
+             ORDER BY g.graded_at DESC LIMIT 1`,
+            [studentId, studentId, studentId]
         );
         res.json(grades[0] || null);
     } catch (error) {
+        console.error('FETCH STUDENT GRADE ERROR:', error.message);
         res.status(500).json({ error: 'Failed to fetch student grade' });
     }
 });
