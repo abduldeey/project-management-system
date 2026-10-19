@@ -409,18 +409,16 @@ export default function App() {
             <button
               type="button"
               onClick={() => setAuthMode('login')}
-              className={`flex-1 py-2 font-medium text-sm border-b-2 ${
-                authMode === 'login' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'
-              }`}
+              className={`flex-1 py-2 font-medium text-sm border-b-2 ${authMode === 'login' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'
+                }`}
             >
               Log In
             </button>
             <button
               type="button"
               onClick={() => setAuthMode('register')}
-              className={`flex-1 py-2 font-medium text-sm border-b-2 ${
-                authMode === 'register' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'
-              }`}
+              className={`flex-1 py-2 font-medium text-sm border-b-2 ${authMode === 'register' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'
+                }`}
             >
               Register
             </button>
@@ -569,7 +567,7 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full space-y-6">
-        
+
         {/* Student Defense Grade Card */}
         {isStudent && studentGrade && (
           <section className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl p-5 shadow-sm">
@@ -686,9 +684,9 @@ export default function App() {
                       </td>
                       <td className="py-2.5 px-3 text-indigo-600 underline">
                         {d.file_url ? (
-                          <a 
-                            href={d.file_url.startsWith('http') ? d.file_url : `${API_BASE}${d.file_url.startsWith('/') ? '' : '/'}${d.file_url}`} 
-                            target="_blank" 
+                          <a
+                            href={d.file_url.startsWith('http') ? d.file_url : `${API_BASE}${d.file_url.startsWith('/') ? '' : '/'}${d.file_url}`}
+                            target="_blank"
                             rel="noreferrer"
                           >
                             Download
@@ -699,20 +697,24 @@ export default function App() {
                       </td>
                       {(isSupervisor || isCoordinator) && (
                         <td className="py-2.5 px-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedStudentForGrading({
-                                student_id: d.student_id || d.user_id || d.id,
-                                student_name: d.student_name,
-                                matric_no: d.matric_no
-                              });
-                              setShowGradeModal(true);
-                            }}
-                            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded text-[11px] font-medium transition"
-                          >
-                            Grade Report
-                          </button>
+                          {d.chapter_title === 'Full Project Report' ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedStudentForGrading({
+                                  student_id: d.student_id || d.user_id || d.id,
+                                  student_name: d.student_name,
+                                  matric_no: d.matric_no
+                                });
+                                setShowGradeModal(true);
+                              }}
+                              className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded text-[11px] font-medium transition shadow-xs"
+                            >
+                              Grade Report
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-slate-400 italic">Draft Review</span>
+                          )}
                         </td>
                       )}
                     </tr>
@@ -790,11 +792,10 @@ export default function App() {
                       <td className="py-3 px-4">{prop.student_name || 'Student'}</td>
                       <td className="py-3 px-4 font-mono">{prop.matric_no || 'N/A'}</td>
                       <td className="py-3 px-4">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                          prop.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' :
-                          prop.status === 'REJECTED' ? 'bg-rose-100 text-rose-700' :
-                          'bg-blue-100 text-blue-700'
-                        }`}>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${prop.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' :
+                            prop.status === 'REJECTED' ? 'bg-rose-100 text-rose-700' :
+                              'bg-blue-100 text-blue-700'
+                          }`}>
                           {prop.status || 'PENDING'}
                         </span>
                       </td>
@@ -1167,8 +1168,8 @@ export default function App() {
                 <span className="font-semibold text-slate-600">Calculated Total:</span>
                 <span className="font-bold text-indigo-600 text-sm">
                   {(Number(gradeForm.documentation_score) || 0) +
-                   (Number(gradeForm.implementation_score) || 0) +
-                   (Number(gradeForm.presentation_score) || 0)} / 100%
+                    (Number(gradeForm.implementation_score) || 0) +
+                    (Number(gradeForm.presentation_score) || 0)} / 100%
                 </span>
               </div>
 
