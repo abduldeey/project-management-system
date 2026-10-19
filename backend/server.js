@@ -176,10 +176,17 @@ async function smartInsert(connection, tableName, customData) {
 // --- 1. USER AUTHENTICATION ---
 
 app.post('/api/auth/register', async (req, res) => {
-    const { email, password, full_name, role, matric_no, staff_no, department } = req.body;
-    if (!email || !password || !full_name || !role) {
-        return res.status(400).json({ error: 'All primary fields are required.' });
-    }
+    const email = req.body.email;
+const password = req.body.password;
+const full_name = req.body.full_name || req.body.fullName || req.body.name;
+const role = req.body.role;
+const matric_no = req.body.matric_no || req.body.matricNo;
+const staff_no = req.body.staff_no || req.body.staffNo;
+const department = req.body.department || 'Computer Science';
+
+if (!email || !password || !full_name || !role) {
+    return res.status(400).json({ error: 'All primary fields are required.' });
+}
 
     const requestedRole = role.toUpperCase();
     const selectedDept = department || 'Computer Science';
@@ -645,12 +652,20 @@ app.post('/api/grades', async (req, res) => {
                 graded_by = VALUES(graded_by)
         `, [student_id, doc, impl, pres, total, letterGrade, remarks || '', validStaffId]);
 
-        const [studentUser] = await db.query(`SELECT user_id FROM students WHERE student_id = ?`, [student_id]);
-        if (studentUser.length > 0) {
-            await db.query(
-                `INSERT INTO system_notifications (user_id, message) VALUES (?, ?)`,
-                [studentUser[0].user_id, `Your final project defense evaluation has been submitted: Total Score ${total}% (Grade: ${letterGrade}).`]
+        try {
+            const [studentUser] = await db.query(
+                `SELECT user_id FROM students WHERE user_id = ? OR id = ? LIMIT 1`,
+                [student_id, student_id]
             );
+            if (studentUser && studentUser.length > 0) {
+                const targetUserId = studentUser[0].user_id || student_id;
+                await db.query(
+                    `INSERT INTO system_notifications (user_id, message) VALUES (?, ?)`,
+                    [targetUserId, `Your final project defense evaluation has been submitted: Total Score ${total}% (Grade: ${letterGrade}).`]
+                ).catch(() => {});
+            }
+        } catch (notifErr) {
+            console.log('Student notification skipped:', notifErr.message);
         }
 
         res.json({ message: 'Grade recorded successfully', total_score: total, letter_grade: letterGrade });
