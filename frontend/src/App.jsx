@@ -79,6 +79,7 @@ export default function App() {
       setIsProcessing(false);
     }
   };
+
   const [selectedProposal, setSelectedProposal] = useState(null);
   const [reviewForm, setReviewForm] = useState({ status: 'APPROVED', remarks: '', score: '' });
 
@@ -181,18 +182,20 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+
     // Fetch student grade if logged-in user is a student
-      if (user?.role === 'STUDENT' && (user?.studentId || user?.userId)) {
-        try {
-          const gRes = await fetch(`${API_BASE}/api/grades/student/${user.studentId || user.userId}`);
-          if (gRes.ok) {
-            const gData = await gRes.json();
-            setStudentGrade(gData);
-          }
-        } catch (gErr) {
-          console.error('Error loading grade:', gErr);
+    if (isStudent && (safeUser.studentId || safeUser.student_id || safeUser.userId || safeUser.id)) {
+      try {
+        const targetId = safeUser.studentId || safeUser.student_id || safeUser.userId || safeUser.id;
+        const gRes = await fetch(`${API_BASE}/api/grades/student/${targetId}`);
+        if (gRes.ok) {
+          const gData = await gRes.json();
+          setStudentGrade(gData);
         }
+      } catch (gErr) {
+        console.error('Error loading grade:', gErr);
       }
+    }
   };
 
   useEffect(() => {
@@ -567,6 +570,53 @@ export default function App() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full space-y-6">
         
+        {/* Student Defense Grade Card */}
+        {isStudent && studentGrade && (
+          <section className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl p-5 shadow-sm">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+              <div>
+                <span className="text-[10px] uppercase tracking-wider font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full">
+                  Official Defense Evaluation
+                </span>
+                <h3 className="text-sm font-bold text-slate-800 mt-2">Final Project Grade & Defense Score</h3>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Graded by: <span className="font-semibold">{studentGrade.grader_name || 'Project Committee'}</span>
+                </p>
+              </div>
+              <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-lg border border-emerald-200 shadow-xs">
+                <div className="text-right">
+                  <div className="text-[11px] text-slate-500">Overall Score</div>
+                  <div className="text-base font-bold text-slate-800">{studentGrade.total_score}%</div>
+                </div>
+                <div className="w-10 h-10 rounded-full bg-emerald-600 text-white font-extrabold flex items-center justify-center text-lg shadow-sm">
+                  {studentGrade.letter_grade}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-4 pt-3 border-t border-emerald-200/60 text-xs">
+              <div className="bg-white/80 p-2.5 rounded border border-emerald-100">
+                <span className="text-slate-500 text-[11px]">Documentation:</span>
+                <span className="font-bold text-slate-800 ml-1">{studentGrade.documentation_score} / 30</span>
+              </div>
+              <div className="bg-white/80 p-2.5 rounded border border-emerald-100">
+                <span className="text-slate-500 text-[11px]">Implementation:</span>
+                <span className="font-bold text-slate-800 ml-1">{studentGrade.implementation_score} / 50</span>
+              </div>
+              <div className="bg-white/80 p-2.5 rounded border border-emerald-100">
+                <span className="text-slate-500 text-[11px]">Presentation:</span>
+                <span className="font-bold text-slate-800 ml-1">{studentGrade.presentation_score} / 20</span>
+              </div>
+            </div>
+
+            {studentGrade.remarks && (
+              <p className="text-xs text-slate-700 bg-white/70 p-2.5 rounded border border-emerald-100 mt-3 italic">
+                "{studentGrade.remarks}"
+              </p>
+            )}
+          </section>
+        )}
+
         {/* Deadlines Section */}
         <section className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
           <h2 className="text-sm font-bold text-slate-800 mb-3">Project Deadlines</h2>
@@ -625,15 +675,29 @@ export default function App() {
                     <th className="py-2.5 px-3">File</th>
                     {(isSupervisor || isCoordinator) && <th className="py-2.5 px-3 text-right">Actions</th>}
                   </tr>
-                  <td className="py-2.5 px-3 text-indigo-600 underline">
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {deliverables.map((d, idx) => (
+                    <tr key={d.deliverable_id || d.id || idx} className="hover:bg-slate-50/50">
+                      <td className="py-2.5 px-3 font-medium text-slate-900">{d.chapter_title}</td>
+                      <td className="py-2.5 px-3">{d.student_name || 'Student'} ({d.matric_no || 'N/A'})</td>
+                      <td className="py-2.5 px-3 text-slate-500">
+                        {d.created_at ? new Date(d.created_at).toLocaleDateString() : 'Recent'}
+                      </td>
+                      <td className="py-2.5 px-3 text-indigo-600 underline">
                         {d.file_url ? (
-                          <a href={d.file_url} target="_blank" rel="noreferrer">
+                          <a 
+                            href={d.file_url.startsWith('http') ? d.file_url : `${API_BASE}${d.file_url.startsWith('/') ? '' : '/'}${d.file_url}`} 
+                            target="_blank" 
+                            rel="noreferrer"
+                          >
                             Download
                           </a>
                         ) : (
-                          'Uploaded'
+                          <span>No file</span>
                         )}
-                      </td>{(isSupervisor || isCoordinator) && (
+                      </td>
+                      {(isSupervisor || isCoordinator) && (
                         <td className="py-2.5 px-3 text-right">
                           <button
                             type="button"
@@ -651,28 +715,6 @@ export default function App() {
                           </button>
                         </td>
                       )}
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {deliverables.map((d, idx) => (
-                    <tr key={d.deliverable_id || d.id || idx} className="hover:bg-slate-50/50">
-                      <td className="py-2.5 px-3 font-medium text-slate-900">{d.chapter_title}</td>
-                      <td className="py-2.5 px-3">{d.student_name || 'Student'} ({d.matric_no || 'N/A'})</td>
-                      <td className="py-2.5 px-3 text-slate-500">
-                        {d.created_at ? new Date(d.created_at).toLocaleDateString() : 'Recent'}
-                      </td>
-                      <td className="py-2.5 px-3 text-indigo-600 underline">
-  {d.file_url ? (
-    <a 
-      href={d.file_url.startsWith('http') ? d.file_url : `${API_BASE}${d.file_url.startsWith('/') ? '' : '/'}${d.file_url}`} 
-      target="_blank" 
-      rel="noreferrer"
-    >
-      Download
-    </a>
-  ) : (
-    <span>No file</span>
-  )}
-</td>
                     </tr>
                   ))}
                 </tbody>
@@ -757,7 +799,7 @@ export default function App() {
                         </span>
                       </td>
                       {(isSupervisor || isCoordinator) && (
-                        <td className="py-3 px-4 text-right space-x-2">
+                        <td className="py-3 px-4 text-right">
                           <button
                             type="button"
                             onClick={() => {
@@ -772,7 +814,6 @@ export default function App() {
                           >
                             Review
                           </button>
-                          
                         </td>
                       )}
                     </tr>
@@ -1008,7 +1049,8 @@ export default function App() {
           </div>
         </div>
       )}
-    {/* REVIEW PROPOSAL MODAL */}
+
+      {/* REVIEW PROPOSAL MODAL */}
       {showReviewModal && selectedProposal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6 border border-slate-200">
@@ -1061,8 +1103,9 @@ export default function App() {
             </form>
           </div>
         </div>
-      )}  
-  {/* DEFENSE GRADING MODAL */}
+      )}
+
+      {/* DEFENSE GRADING MODAL */}
       {showGradeModal && selectedStudentForGrading && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6 border border-slate-200">
