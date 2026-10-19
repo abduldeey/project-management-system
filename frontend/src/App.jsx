@@ -36,6 +36,48 @@ export default function App() {
   const [showAllocateModal, setShowAllocateModal] = useState(false);
   const [showDeadlineModal, setShowDeadlineModal] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [showGradeModal, setShowGradeModal] = useState(false);
+  const [selectedStudentForGrading, setSelectedStudentForGrading] = useState(null);
+  const [gradeForm, setGradeForm] = useState({
+    documentation_score: '',
+    implementation_score: '',
+    presentation_score: '',
+    remarks: ''
+  });
+
+  const handleGradeSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedStudentForGrading) return;
+    setIsProcessing(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/grades`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          student_id: selectedStudentForGrading.student_id || selectedStudentForGrading.id,
+          documentation_score: Number(gradeForm.documentation_score) || 0,
+          implementation_score: Number(gradeForm.implementation_score) || 0,
+          presentation_score: Number(gradeForm.presentation_score) || 0,
+          remarks: gradeForm.remarks,
+          staff_id: user?.staffId || 1
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`Grade recorded! Total: ${data.total_score}% (Grade: ${data.letter_grade})`);
+        setShowGradeModal(false);
+        setSelectedStudentForGrading(null);
+        setGradeForm({ documentation_score: '', implementation_score: '', presentation_score: '', remarks: '' });
+        await fetchData();
+      } else {
+        alert('Grading failed: ' + (data.error || res.statusText));
+      }
+    } catch (err) {
+      alert('Error recording grade: ' + err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
   const [selectedProposal, setSelectedProposal] = useState(null);
   const [reviewForm, setReviewForm] = useState({ status: 'APPROVED', remarks: '', score: '' });
 
@@ -674,7 +716,7 @@ export default function App() {
                         </span>
                       </td>
                       {(isSupervisor || isCoordinator) && (
-                        <td className="py-3 px-4 text-right">
+                        <td className="py-3 px-4 text-right space-x-2">
                           <button
                             type="button"
                             onClick={() => {
@@ -688,6 +730,16 @@ export default function App() {
                             className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded text-[11px] font-medium transition"
                           >
                             Review
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedStudentForGrading(prop);
+                              setShowGradeModal(true);
+                            }}
+                            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded text-[11px] font-medium transition"
+                          >
+                            Grade Defense
                           </button>
                         </td>
                       )}
@@ -978,7 +1030,107 @@ export default function App() {
           </div>
         </div>
       )}  
-  
+  {/* DEFENSE GRADING MODAL */}
+      {showGradeModal && selectedStudentForGrading && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6 border border-slate-200">
+            <h3 className="text-base font-bold text-slate-800 mb-1">Final Defense Grading</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Student: {selectedStudentForGrading.student_name || 'Student'} ({selectedStudentForGrading.matric_no || 'N/A'})
+            </p>
+
+            <form onSubmit={handleGradeSubmit} className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  Documentation Score (Max 30%)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="30"
+                  required
+                  placeholder="e.g. 25"
+                  value={gradeForm.documentation_score}
+                  onChange={(e) => setGradeForm({ ...gradeForm, documentation_score: e.target.value })}
+                  className="w-full px-3 py-1.5 border rounded-lg text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  Implementation Score (Max 50%)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="50"
+                  required
+                  placeholder="e.g. 42"
+                  value={gradeForm.implementation_score}
+                  onChange={(e) => setGradeForm({ ...gradeForm, implementation_score: e.target.value })}
+                  className="w-full px-3 py-1.5 border rounded-lg text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  Presentation Score (Max 20%)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="20"
+                  required
+                  placeholder="e.g. 18"
+                  value={gradeForm.presentation_score}
+                  onChange={(e) => setGradeForm({ ...gradeForm, presentation_score: e.target.value })}
+                  className="w-full px-3 py-1.5 border rounded-lg text-xs"
+                />
+              </div>
+
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 flex justify-between items-center text-xs">
+                <span className="font-semibold text-slate-600">Calculated Total:</span>
+                <span className="font-bold text-indigo-600 text-sm">
+                  {(Number(gradeForm.documentation_score) || 0) +
+                   (Number(gradeForm.implementation_score) || 0) +
+                   (Number(gradeForm.presentation_score) || 0)} / 100%
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-600 mb-1">Supervisor Remarks</label>
+                <textarea
+                  rows="2"
+                  placeholder="Defense feedback and evaluation summary..."
+                  value={gradeForm.remarks}
+                  onChange={(e) => setGradeForm({ ...gradeForm, remarks: e.target.value })}
+                  className="w-full px-3 py-1.5 border rounded-lg text-xs"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowGradeModal(false);
+                    setSelectedStudentForGrading(null);
+                  }}
+                  className="px-4 py-2 text-xs border rounded-lg text-slate-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isProcessing}
+                  className="px-4 py-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium"
+                >
+                  {isProcessing ? 'Saving...' : 'Submit Grade'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
