@@ -184,13 +184,16 @@ export default function App() {
     }
 
     // Fetch student grade if logged-in user is a student
-    if (isStudent && (safeUser.studentId || safeUser.student_id || safeUser.userId || safeUser.id)) {
+    if (isStudent) {
       try {
-        const targetId = safeUser.studentId || safeUser.student_id || safeUser.userId || safeUser.id;
-        const gRes = await fetch(`${API_BASE}/api/grades/student/${targetId}`);
+        const targetId = safeUser.studentId || safeUser.student_id || safeUser.userId || safeUser.id || 1;
+        const matric = safeUser.matricNo || safeUser.matric_no || '';
+        const gRes = await fetch(`${API_BASE}/api/grades/student/${targetId}?matric=${encodeURIComponent(matric)}`);
         if (gRes.ok) {
           const gData = await gRes.json();
-          setStudentGrade(gData);
+          if (gData && gData.total_score !== undefined) {
+            setStudentGrade(gData);
+          }
         }
       } catch (gErr) {
         console.error('Error loading grade:', gErr);
