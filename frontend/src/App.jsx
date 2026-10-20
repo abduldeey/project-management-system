@@ -191,7 +191,7 @@ export default function App() {
         const gRes = await fetch(`${API_BASE}/api/grades/student/${targetId}?matric=${encodeURIComponent(matric)}`);
         if (gRes.ok) {
           const gData = await gRes.json();
-          if (gData && gData.total_score !== undefined) {
+          if (gData && (gData.total_score !== undefined || gData.letter_grade)) {
             setStudentGrade(gData);
           }
         }
