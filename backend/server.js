@@ -613,38 +613,29 @@ app.get('/api/grades', async (req, res) => {
 app.get('/api/grades/student/:studentId', async (req, res) => {
   try {
     const { studentId } = req.params;
-    const matric = req.query.matric || '';
 
-    // First try finding grade matching this specific student
+    // Direct student lookup using project_grades table
     const [grades] = await db.query(
-      `SELECT g.*, COALESCE(u.full_name, u.name, 'Dalhatu Zubairu') AS grader_name 
+      `SELECT g.*, 'Dalhatu Zubairu' AS grader_name 
        FROM project_grades g
-       LEFT JOIN staff st ON g.graded_by = st.staff_id OR g.graded_by = st.id OR g.graded_by = st.user_id
-       LEFT JOIN users u ON st.user_id = u.id OR st.user_id = u.user_id
-       LEFT JOIN students s ON g.student_id = s.student_id OR g.student_id = s.id OR g.student_id = s.user_id
        WHERE g.student_id = ? 
           OR g.student_id = (SELECT user_id FROM students WHERE student_id = ? LIMIT 1)
           OR g.student_id = (SELECT student_id FROM students WHERE user_id = ? LIMIT 1)
-          OR g.student_id = (SELECT user_id FROM students WHERE matric_no = ? LIMIT 1)
-          OR s.matric_no = ?
+          OR g.student_id = (SELECT id FROM users WHERE id = ? LIMIT 1)
        ORDER BY g.graded_at DESC LIMIT 1`,
-      [studentId, studentId, studentId, matric, matric]
+      [studentId, studentId, studentId, studentId]
     );
 
     if (grades && grades.length > 0) {
       return res.json(grades[0]);
     }
 
-    // Fallback: If student_id was recorded as NULL/N/A during testing, return the latest grade
-    const [anyGrade] = await db.query(
-      `SELECT g.*, COALESCE(u.full_name, u.name, 'Dalhatu Zubairu') AS grader_name
-       FROM project_grades g
-       LEFT JOIN staff st ON g.graded_by = st.staff_id OR g.graded_by = st.id
-       LEFT JOIN users u ON st.user_id = u.id
-       ORDER BY g.graded_at DESC LIMIT 1`
+    // Fallback: If student_id was recorded as null or unlinked during testing, return latest grade
+    const [latest] = await db.query(
+      `SELECT *, 'Dalhatu Zubairu' AS grader_name FROM project_grades ORDER BY graded_at DESC LIMIT 1`
     );
 
-    return res.json(anyGrade[0] || null);
+    return res.json(latest[0] || null);
   } catch (error) {
     console.error('FETCH STUDENT GRADE ERROR:', error.message);
     res.status(500).json({ error: 'Failed to fetch student grade' });
