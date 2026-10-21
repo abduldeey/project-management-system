@@ -139,17 +139,18 @@ export default function App() {
 
   // --- DYNAMIC ROLE EVALUATION ---
   const safeUser = user || {};
-  const rawRole = (safeUser.role || safeUser.user_role || '').toString().toLowerCase().trim();
+  const rawRole = (safeUser.role || safeUser.user_role || '').toString().toUpperCase().trim();
   const rawEmail = (safeUser.email || '').toString().toLowerCase().trim();
 
   const isCoordinator =
-    rawRole.includes('coord') ||
-    rawRole === 'admin' ||
+    rawRole === 'COORDINATOR' ||
+    rawRole.includes('COORD') ||
+    rawRole === 'ADMIN' ||
     rawEmail.includes('coord') ||
     rawEmail === 'maryamdalhatu@gmail.com';
 
   const isSupervisor =
-    (rawRole.includes('super') || rawRole.includes('lect') || rawRole.includes('facul')) &&
+    (rawRole === 'SUPERVISOR' || rawRole.includes('SUPER') || rawRole.includes('LECT') || rawRole.includes('FACUL')) &&
     !isCoordinator;
 
   const isStudent = !isCoordinator && !isSupervisor;
