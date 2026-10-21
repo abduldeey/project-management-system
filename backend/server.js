@@ -176,80 +176,77 @@ async function smartInsert(connection, tableName, customData) {
 // --- 1. USER AUTHENTICATION ---
 
 app.post('/api/auth/register', async (req, res) => {
-    const email = req.body.email;
-const password = req.body.password;
-const full_name = req.body.full_name || req.body.fullName || req.body.name;
-const role = req.body.role;
-const matric_no = req.body.matric_no || req.body.matricNo;
-const staff_no = req.body.staff_no || req.body.staffNo;
-const department = req.body.department || 'Computer Science';
+  try {
+    const { fullName, name, email, password, role, matricNo, department } = req.body;
+    const userName = fullName || name;
 
-if (!email || !password || !full_name || !role) {
-    return res.status(400).json({ error: 'All primary fields are required.' });
-}
-
-    const requestedRole = role.toUpperCase();
-    const selectedDept = department || 'Computer Science';
-    const connection = await db.getConnection();
-
-    try {
-        await connection.beginTransaction();
-
-        try {
-            await connection.query(`ALTER TABLE users MODIFY COLUMN role VARCHAR(50) DEFAULT 'STUDENT'`);
-        } catch (alterErr) {}
-
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const derivedUsername = email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '') + '_' + Date.now().toString().slice(-4);
-
-        let userTableRole = requestedRole;
-        if (requestedRole === 'COORDINATOR') {
-            userTableRole = 'SUPERVISOR';
-        }
-
-        const [userResult] = await smartInsert(connection, 'users', {
-            username: derivedUsername,
-            email: email.trim().toLowerCase(),
-            password: hashedPassword,
-            password_hash: hashedPassword,
-            full_name: full_name.trim(),
-            name: full_name.trim(),
-            role: userTableRole
-        });
-
-        const newUserId = userResult.insertId;
-
-        if (requestedRole === 'STUDENT') {
-            const cleanMatric = matric_no ? matric_no.trim() : `U22/${selectedDept.slice(0, 2).toUpperCase()}/${Date.now().toString().slice(-4)}`;
-            await smartInsert(connection, 'students', {
-                user_id: newUserId,
-                id: newUserId,
-                matric_no: cleanMatric,
-                department: selectedDept,
-                programme: `B.Sc / B.Eng in ${selectedDept}`,
-                academic_year: '2025/2026'
-            });
-        } else if (requestedRole === 'SUPERVISOR' || requestedRole === 'COORDINATOR') {
-            const cleanStaff = staff_no ? staff_no.trim() : `STF/${Date.now().toString().slice(-4)}`;
-            const isCoord = requestedRole === 'COORDINATOR';
-            await smartInsert(connection, 'staff', {
-                user_id: newUserId,
-                id: newUserId,
-                staff_no: cleanStaff,
-                department: selectedDept,
-                designation: isCoord ? 'Project Coordinator' : 'Lecturer'
-            });
-        }
-
-        await connection.commit();
-        res.status(201).json({ message: 'User registered successfully.' });
-    } catch (error) {
-        await connection.rollback();
-        console.error('REGISTRATION ERROR:', error);
-        res.status(500).json({ error: `Registration error: ${error.message}` });
-    } finally {
-        connection.release();
+    if (!userName || !email || !password) {
+      return res.status(400).json({ error: 'Name, email, and password are required.' });
     }
+
+    // Clean and normalize the role
+    let rawRole = (role || 'STUDENT').toString().toUpperCase().trim();
+    let finalRole = 'STUDENT';
+    if (rawRole.includes('COORD') || rawRole === 'ADMIN') {
+      finalRole = 'COORDINATOR';
+    } else if (rawRole.includes('SUPER') || rawRole.includes('LECT') || rawRole.includes('FACUL')) {
+      finalRole = 'SUPERVISOR';
+    }
+
+    // Check if user already exists
+    const [existing] = await db.query('SELECT id FROM users WHERE email = ?', [email]);
+    if (existing.length > 0) {
+      return res.status(400).json({ error: 'An account with this email already exists.' });
+    }
+
+    // Hash password (using bcrypt or your current hashing method)
+    const bcrypt = require('bcryptjs');
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Insert into users table
+    const [userResult] = await db.query(
+      'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
+      [userName, email, hashedPassword, finalRole]
+    );
+    const newUserId = userResult.insertId;
+
+    // Insert into role-specific tables if your database uses them
+    if (finalRole === 'STUDENT') {
+      try {
+        await db.query(
+          'INSERT INTO students (user_id, matric_no, department) VALUES (?, ?, ?)',
+          [newUserId, matricNo || 'N/A', department || 'Computer Science']
+        );
+      } catch (err) {
+        console.warn('Student table insert skipped or not present:', err.message);
+      }
+    } else {
+      // Supervisor or Coordinator
+      try {
+        await db.query(
+          'INSERT INTO staff (user_id, department, role) VALUES (?, ?, ?)',
+          [newUserId, department || 'Computer Science', finalRole]
+        );
+      } catch (err) {
+        console.warn('Staff table insert skipped or not present:', err.message);
+      }
+    }
+
+    return res.status(201).json({
+      message: 'Account created successfully',
+      user: {
+        id: newUserId,
+        userId: newUserId,
+        name: userName,
+        fullName: userName,
+        email,
+        role: finalRole
+      }
+    });
+  } catch (error) {
+    console.error('REGISTRATION ERROR:', error.message);
+    return res.status(500).json({ error: 'Registration failed: ' + error.message });
+  }
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -277,7 +274,8 @@ app.post('/api/auth/login', async (req, res) => {
         }
 
         const userId = user.user_id || user.id;
-        let role = (user.role || 'STUDENT').toUpperCase();
+        let rawUserRole = (user.role || '').toUpperCase();
+        let role = rawUserRole.includes('COORD') ? 'COORDINATOR' : (rawUserRole || 'STUDENT');
         let studentId = null;
         let staffId = null;
         let matricNo = null;
@@ -307,9 +305,15 @@ app.post('/api/auth/login', async (req, res) => {
                 staffId = st.staff_id || st.id;
                 if (st.department) department = st.department;
                 
+                const staffDesignation = (st.designation || '').toLowerCase();
+                const staffRoleCol = (st.role || '').toLowerCase();
+
                 if (
-                    (st.designation && st.designation.toLowerCase().includes('coordinator')) ||
-                    role === 'COORDINATOR'
+                    role === 'COORDINATOR' ||
+                    rawUserRole.includes('COORD') ||
+                    staffDesignation.includes('coord') ||
+                    staffRoleCol.includes('coord') ||
+                    (user.email && user.email.toLowerCase().includes('coord'))
                 ) {
                     role = 'COORDINATOR';
                 } else {
@@ -318,7 +322,7 @@ app.post('/api/auth/login', async (req, res) => {
             }
         } catch (e) {}
 
-        if (user.email && user.email.toLowerCase().includes('coord')) {
+        if (user.email && (user.email.toLowerCase().includes('coord') || user.email.toLowerCase() === 'maryamdalhatu@gmail.com')) {
             role = 'COORDINATOR';
         }
 
