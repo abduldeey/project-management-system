@@ -155,14 +155,17 @@ export default function App() {
 
   const isStudent = !isCoordinator && !isSupervisor;
 
-  // --- FETCH DATA ---
+ // --- FETCH DATA ---
   const fetchData = async () => {
     setLoading(true);
     try {
+      const staffOrUserId = safeUser.staffId || safeUser.userId || safeUser.id || '';
+      const userRoleParam = isCoordinator ? 'COORDINATOR' : (isSupervisor ? 'SUPERVISOR' : 'STUDENT');
+
       const [propRes, deadRes, delivRes] = await Promise.all([
-        fetch(`${API_BASE}/api/proposals`),
+        fetch(`${API_BASE}/api/proposals?supervisorId=${staffOrUserId}&role=${userRoleParam}`),
         fetch(`${API_BASE}/api/deadlines`),
-        fetch(`${API_BASE}/api/deliverables`)
+        fetch(`${API_BASE}/api/deliverables?supervisorId=${staffOrUserId}&role=${userRoleParam}`)
       ]);
 
       const propData = propRes.ok ? await propRes.json() : [];
