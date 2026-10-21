@@ -159,13 +159,13 @@ export default function App() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const staffOrUserId = safeUser.staffId || safeUser.userId || safeUser.id || '';
+      const staffOrUserId = safeUser.studentId || safeUser.student_id || safeUser.staffId || safeUser.userId || safeUser.id || '';
       const userRoleParam = isCoordinator ? 'COORDINATOR' : (isSupervisor ? 'SUPERVISOR' : 'STUDENT');
 
       const [propRes, deadRes, delivRes] = await Promise.all([
-        fetch(`${API_BASE}/api/proposals?supervisorId=${staffOrUserId}&role=${userRoleParam}`),
+        fetch(`${API_BASE}/api/proposals?supervisorId=${staffOrUserId}&studentId=${staffOrUserId}&role=${userRoleParam}`),
         fetch(`${API_BASE}/api/deadlines`),
-        fetch(`${API_BASE}/api/deliverables?supervisorId=${staffOrUserId}&role=${userRoleParam}`)
+        fetch(`${API_BASE}/api/deliverables?supervisorId=${staffOrUserId}&studentId=${staffOrUserId}&role=${userRoleParam}`)
       ]);
 
       const propData = propRes.ok ? await propRes.json() : [];
@@ -190,21 +190,32 @@ export default function App() {
     // Fetch student grade if logged-in user is a student
     if (isStudent) {
       try {
-        const targetId = safeUser.studentId || safeUser.student_id || safeUser.userId || safeUser.id || 1;
+        const targetId = safeUser.studentId || safeUser.student_id || safeUser.userId || safeUser.id;
         const matric = safeUser.matricNo || safeUser.matric_no || '';
-        const gRes = await fetch(`${API_BASE}/api/grades/student/${targetId}?matric=${encodeURIComponent(matric)}`);
-        if (gRes.ok) {
-          const gData = await gRes.json();
-          if (gData && (gData.total_score !== undefined || gData.letter_grade)) {
-            setStudentGrade(gData);
+
+        if (!targetId) {
+          setStudentGrade(null);
+        } else {
+          const gRes = await fetch(`${API_BASE}/api/grades/student/${targetId}?matric=${encodeURIComponent(matric)}`);
+          if (gRes.ok) {
+            const gData = await gRes.json();
+            if (gData && (gData.total_score !== undefined || gData.letter_grade)) {
+              setStudentGrade(gData);
+            } else {
+              setStudentGrade(null);
+            }
+          } else {
+            setStudentGrade(null);
           }
         }
       } catch (gErr) {
         console.error('Error loading grade:', gErr);
+        setStudentGrade(null);
       }
+    } else {
+      setStudentGrade(null);
     }
   };
-
   useEffect(() => {
     if (user) {
       fetchData();
