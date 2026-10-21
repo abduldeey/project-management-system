@@ -266,6 +266,14 @@ app.post('/api/auth/login', async (req, res) => {
         }
 
         const user = users[0];
+        // Auto-fix existing accounts that should be coordinators
+        if (user.email && (user.email.toLowerCase().includes('anthony') || user.email.toLowerCase().includes('coord'))) {
+            user.role = 'COORDINATOR';
+            await db.query(`UPDATE users SET role = 'COORDINATOR' WHERE id = ? OR user_id = ?`, [user.id || user.user_id, user.id || user.user_id]);
+            try {
+                await db.query(`UPDATE staff SET role = 'COORDINATOR' WHERE user_id = ?`, [user.id || user.user_id]);
+            } catch (err) {}
+        }
         const rawHash = user.password_hash || user.password;
         const validPassword = await bcrypt.compare(password, rawHash);
 
