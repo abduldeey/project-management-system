@@ -146,8 +146,7 @@ export default function App() {
     rawRole === 'COORDINATOR' ||
     rawRole.includes('COORD') ||
     rawRole === 'ADMIN' ||
-    rawEmail.includes('coord') ||
-    rawEmail === 'maryamdalhatu@gmail.com';
+    rawEmail.includes('coord');
 
   const isSupervisor =
     (rawRole === 'SUPERVISOR' || rawRole.includes('SUPER') || rawRole.includes('LECT') || rawRole.includes('FACUL')) &&
