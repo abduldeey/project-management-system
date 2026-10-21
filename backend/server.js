@@ -14,25 +14,22 @@ const JWT_SECRET = process.env.JWT_SECRET || 'university_project_management_secr
 app.use(cors());
 app.use(express.json());
 
-// Ensure uploads folder exists (declared once)
+// Uploads setup
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
 }
 app.use('/uploads', express.static(uploadsDir));
 
-// Route to handle downloads and diagnose missing files
 app.get('/uploads/:filename', (req, res) => {
     const filePath = path.join(uploadsDir, req.params.filename);
-
     if (!fs.existsSync(filePath)) {
         return res.status(404).json({
             status: 'File Missing',
-            message: 'This file does not exist on the server disk. If Render restarted, local uploads were wiped.',
+            message: 'This file does not exist on the server disk.',
             searchedPath: filePath
         });
     }
-
     res.sendFile(filePath);
 });
 
@@ -41,12 +38,11 @@ app.get('/api/test-uploads', (req, res) => {
         const files = fs.readdirSync(uploadsDir);
         res.json({
             success: true,
-            uploadsDirFullPath: uploadsDir,
             totalFiles: files.length,
             filesInsideFolder: files
         });
     } catch (err) {
-        res.status(500).json({ error: err.message, uploadsDirFullPath: uploadsDir });
+        res.status(500).json({ error: err.message });
     }
 });
 
@@ -60,43 +56,6 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// Auto-fills column fallbacks
-async function smartInsert(connection, tableName, customData) {
-    const [cols] = await connection.query(`SHOW COLUMNS FROM ??`, [tableName]);
-    const insertObj = {};
-    for (const col of cols) {
-        const field = col.Field;
-        if (col.Extra && col.Extra.includes('auto_increment')) continue;
-
-        if (customData[field] !== undefined && customData[field] !== null) {
-            insertObj[field] = customData[field];
-        } else if (col.Null === 'NO' && col.Default === null) {
-            if (field === 'role') {
-                if (col.Type && col.Type.startsWith('enum(')) {
-                    const firstOption = col.Type.match(/'([^']+)'/);
-                    insertObj[field] = firstOption ? firstOption[1] : 'student';
-                } else {
-                    insertObj[field] = 'student';
-                }
-            }
-            else if (field.includes('year')) insertObj[field] = '2025/2026';
-            else if (field.includes('dept') || field.includes('department')) insertObj[field] = customData.department || 'Computer Science';
-            else if (field.includes('prog') || field.includes('programme')) insertObj[field] = 'B.Eng / B.Sc';
-            else if (field.includes('level')) insertObj[field] = '400';
-            else if (field.includes('status')) insertObj[field] = 'ACTIVE';
-            else if (field.includes('name')) insertObj[field] = 'User';
-            else if (field.includes('created') || field.includes('date') || field.includes('time')) insertObj[field] = new Date();
-            else insertObj[field] = 'Default';
-        }
-    }
-    const columns = Object.keys(insertObj);
-    const placeholders = columns.map(() => '?').join(', ');
-    const values = Object.values(insertObj);
-
-    const sql = `INSERT INTO ?? (${columns.map(c => `\`${c}\``).join(', ')}) VALUES (${placeholders})`;
-    return await connection.query(sql, [tableName, ...values]);
-}
-
 // Database Schema Initializer
 (async () => {
     try {
@@ -107,6 +66,7 @@ async function smartInsert(connection, tableName, customData) {
                 staff_no VARCHAR(50) DEFAULT 'STF/001',
                 department VARCHAR(100) DEFAULT 'Computer Science',
                 designation VARCHAR(100) DEFAULT 'Lecturer',
+                role VARCHAR(50) DEFAULT 'SUPERVISOR',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 INDEX (user_id)
             ) ENGINE=InnoDB;
@@ -117,6 +77,7 @@ async function smartInsert(connection, tableName, customData) {
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 title VARCHAR(255) NOT NULL,
                 deadline_date DATETIME NOT NULL,
+                description TEXT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB;
         `);
@@ -153,6 +114,15 @@ async function smartInsert(connection, tableName, customData) {
         `);
 
         await db.query(`
+            CREATE TABLE IF NOT EXISTS allocations (
+                allocation_id INT AUTO_INCREMENT PRIMARY KEY,
+                student_id INT NOT NULL,
+                supervisor_id INT NOT NULL,
+                allocated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB;
+        `);
+
+        await db.query(`
             CREATE TABLE IF NOT EXISTS project_grades (
                 grade_id INT AUTO_INCREMENT PRIMARY KEY,
                 student_id INT NOT NULL UNIQUE,
@@ -167,86 +137,87 @@ async function smartInsert(connection, tableName, customData) {
             ) ENGINE=InnoDB;
         `);
 
-        console.log('All database tables verified/created successfully.');
+        console.log('Database tables verified.');
     } catch (e) {
         console.error('Table init error:', e.message);
     }
 })();
 
-// --- 1. USER AUTHENTICATION ---
+// --- 1. GENERAL AUTHENTICATION ---
 
 app.post('/api/auth/register', async (req, res) => {
-  try {
-    const { fullName, name, email, password, role, matricNo, department } = req.body;
-    const userName = fullName || name;
+    try {
+        const { fullName, name, email, password, role, matricNo, department } = req.body;
+        const userName = (fullName || name || '').trim();
 
-    if (!userName || !email || !password) {
-      return res.status(400).json({ error: 'Name, email, and password are required.' });
-    }
+        if (!userName || !email || !password) {
+            return res.status(400).json({ error: 'Name, email, and password are required.' });
+        }
 
-    // Clean and normalize the role
-    let rawRole = (role || 'STUDENT').toString().toUpperCase().trim();
-    let finalRole = 'STUDENT';
-    if (rawRole.includes('COORD') || rawRole === 'ADMIN') {
-      finalRole = 'COORDINATOR';
-    } else if (rawRole.includes('SUPER') || rawRole.includes('LECT') || rawRole.includes('FACUL')) {
-      finalRole = 'SUPERVISOR';
-    }
+        let rawRole = (role || 'STUDENT').toString().toUpperCase().trim();
+        let finalRole = 'STUDENT';
+        if (rawRole.includes('COORD') || rawRole === 'ADMIN') {
+            finalRole = 'COORDINATOR';
+        } else if (rawRole.includes('SUPER') || rawRole.includes('LECT') || rawRole.includes('FACUL')) {
+            finalRole = 'SUPERVISOR';
+        }
 
-    // Check if user already exists
-    const [existing] = await db.query('SELECT id FROM users WHERE email = ?', [email]);
-    if (existing.length > 0) {
-      return res.status(400).json({ error: 'An account with this email already exists.' });
-    }
+        const [existing] = await db.query('SELECT id FROM users WHERE LOWER(email) = LOWER(?)', [email.trim()]);
+        if (existing.length > 0) {
+            return res.status(400).json({ error: 'An account with this email already exists.' });
+        }
 
-    // Hash password (using bcrypt or your current hashing method)
-    const bcrypt = require('bcryptjs');
-    const hashedPassword = await bcrypt.hash(password, 10);
+        const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Insert into users table
-    const [userResult] = await db.query(
-      'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
-      [userName, email, hashedPassword, finalRole]
-    );
-    const newUserId = userResult.insertId;
-
-    // Insert into role-specific tables if your database uses them
-    if (finalRole === 'STUDENT') {
-      try {
-        await db.query(
-          'INSERT INTO students (user_id, matric_no, department) VALUES (?, ?, ?)',
-          [newUserId, matricNo || 'N/A', department || 'Computer Science']
+        const [userResult] = await db.query(
+            'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
+            [userName, email.trim(), hashedPassword, finalRole]
         );
-      } catch (err) {
-        console.warn('Student table insert skipped or not present:', err.message);
-      }
-    } else {
-      // Supervisor or Coordinator
-      try {
-        await db.query(
-          'INSERT INTO staff (user_id, department, role) VALUES (?, ?, ?)',
-          [newUserId, department || 'Computer Science', finalRole]
-        );
-      } catch (err) {
-        console.warn('Staff table insert skipped or not present:', err.message);
-      }
-    }
+        const newUserId = userResult.insertId;
 
-    return res.status(201).json({
-      message: 'Account created successfully',
-      user: {
-        id: newUserId,
-        userId: newUserId,
-        name: userName,
-        fullName: userName,
-        email,
-        role: finalRole
-      }
-    });
-  } catch (error) {
-    console.error('REGISTRATION ERROR:', error.message);
-    return res.status(500).json({ error: 'Registration failed: ' + error.message });
-  }
+        let newStudentId = null;
+        let newStaffId = null;
+
+        if (finalRole === 'STUDENT') {
+            try {
+                const [stRes] = await db.query(
+                    'INSERT INTO students (user_id, matric_no, department) VALUES (?, ?, ?)',
+                    [newUserId, matricNo || 'N/A', department || 'Computer Science']
+                );
+                newStudentId = stRes.insertId;
+            } catch (err) {
+                console.warn('Student record notice:', err.message);
+            }
+        } else {
+            try {
+                const [staffRes] = await db.query(
+                    'INSERT INTO staff (user_id, department, role, designation) VALUES (?, ?, ?, ?)',
+                    [newUserId, department || 'Computer Science', finalRole, finalRole === 'COORDINATOR' ? 'Project Coordinator' : 'Lecturer']
+                );
+                newStaffId = staffRes.insertId;
+            } catch (err) {
+                console.warn('Staff record notice:', err.message);
+            }
+        }
+
+        return res.status(201).json({
+            message: 'Account created successfully',
+            user: {
+                userId: newUserId,
+                id: newUserId,
+                fullName: userName,
+                name: userName,
+                email: email.trim(),
+                role: finalRole,
+                studentId: newStudentId,
+                staffId: newStaffId,
+                matricNo: matricNo || ''
+            }
+        });
+    } catch (error) {
+        console.error('REGISTRATION ERROR:', error.message);
+        return res.status(500).json({ error: 'Registration failed: ' + error.message });
+    }
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -256,9 +227,6 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     try {
-        const bcrypt = require('bcryptjs');
-        const jwt = require('jsonwebtoken');
-
         const [users] = await db.query(
             `SELECT * FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1`,
             [email.trim()]
@@ -277,50 +245,54 @@ app.post('/api/auth/login', async (req, res) => {
         }
 
         const userId = user.user_id || user.id;
-        let role = (user.role || 'STUDENT').toUpperCase().trim();
+        let role = (user.role || 'STUDENT').toString().toUpperCase().trim();
         let studentId = null;
         let staffId = null;
         let matricNo = null;
         let department = 'Computer Science';
 
-        // Auto-detect coordinator designation
-        if (
-            role.includes('COORD') || 
-            (user.email && user.email.toLowerCase().includes('anthony')) ||
-            (user.email && user.email.toLowerCase().includes('coord'))
-        ) {
-            role = 'COORDINATOR';
-        }
-
+        // Read student profile
         try {
             const [studentRows] = await db.query(
                 `SELECT * FROM students WHERE user_id = ? OR id = ? LIMIT 1`,
                 [userId, userId]
             );
             if (studentRows && studentRows.length > 0) {
-                const s = studentRows[0];
-                studentId = s.student_id || s.id;
-                matricNo = s.matric_no;
-                if (s.department) department = s.department;
-                if (role !== 'COORDINATOR') role = 'STUDENT';
+                studentId = studentRows[0].student_id || studentRows[0].id;
+                matricNo = studentRows[0].matric_no;
+                if (studentRows[0].department) department = studentRows[0].department;
+                if (!role.includes('COORD') && !role.includes('SUPER')) {
+                    role = 'STUDENT';
+                }
             }
         } catch (e) {}
 
+        // Read staff profile
         try {
             const [staffRows] = await db.query(
                 `SELECT * FROM staff WHERE user_id = ? OR id = ? LIMIT 1`,
                 [userId, userId]
             );
             if (staffRows && staffRows.length > 0) {
-                const st = staffRows[0];
-                staffId = st.staff_id || st.id;
-                if (st.department) department = st.department;
+                staffId = staffRows[0].staff_id || staffRows[0].id;
+                if (staffRows[0].department) department = staffRows[0].department;
+                const stRole = (staffRows[0].role || staffRows[0].designation || '').toUpperCase();
+                if (stRole.includes('COORD') || role.includes('COORD')) {
+                    role = 'COORDINATOR';
+                } else {
+                    role = 'SUPERVISOR';
+                }
             }
         } catch (e) {}
 
+        // Fallback for coordinator detection by role/email
+        if (role.includes('COORD') || (user.email && user.email.toLowerCase().includes('coord'))) {
+            role = 'COORDINATOR';
+        }
+
         const token = jwt.sign(
             { userId, email: user.email, role, department },
-            process.env.JWT_SECRET || 'pms_secret_key_2026',
+            JWT_SECRET,
             { expiresIn: '24h' }
         );
 
@@ -329,7 +301,9 @@ app.post('/api/auth/login', async (req, res) => {
             token,
             user: {
                 userId,
+                id: userId,
                 fullName: user.full_name || user.name,
+                name: user.full_name || user.name,
                 email: user.email,
                 role,
                 department,
@@ -344,7 +318,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// --- 2. SUPERVISOR ALLOCATION (COORDINATOR) ---
+// --- 2. SUPERVISOR ALLOCATION ---
 
 app.get('/api/allocations', async (req, res) => {
     try {
@@ -357,7 +331,7 @@ app.get('/api/allocations', async (req, res) => {
             const r = (u.role || '').toString().toLowerCase().trim();
             const email = (u.email || '').toString().toLowerCase().trim();
             
-            if (r.includes('coord') || email === 'maryamdalhatu@gmail.com') {
+            if (r.includes('coord') || email.includes('coord')) {
                 return;
             }
 
@@ -378,7 +352,6 @@ app.get('/api/allocations', async (req, res) => {
 
         return res.json({ students, supervisors });
     } catch (err) {
-        console.error('CRITICAL ALLOCATION ERROR:', err.message);
         return res.status(500).json({ error: err.message, students: [], supervisors: [] });
     }
 });
@@ -394,44 +367,21 @@ app.post('/api/allocations', async (req, res) => {
         }
 
         await db.query(`
-            CREATE TABLE IF NOT EXISTS allocations (
-                allocation_id INT AUTO_INCREMENT PRIMARY KEY,
-                student_id INT NOT NULL,
-                supervisor_id INT NOT NULL,
-                allocated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        `).catch(() => {});
+            INSERT INTO allocations (student_id, supervisor_id) VALUES (?, ?)
+            ON DUPLICATE KEY UPDATE supervisor_id = VALUES(supervisor_id)
+        `, [sId, spId]).catch(() => {});
+
+        await db.query(`
+            INSERT INTO supervisor_allocations (student_id, staff_id) VALUES (?, ?)
+            ON DUPLICATE KEY UPDATE staff_id = VALUES(staff_id)
+        `, [sId, spId]).catch(() => {});
 
         try {
-            await db.query(
-                `INSERT INTO allocations (student_id, supervisor_id) VALUES (?, ?)`,
-                [sId, spId]
-            );
-        } catch (err1) {
-            try {
-                await db.query(
-                    `INSERT INTO allocations (student_id, staff_id) VALUES (?, ?)`,
-                    [sId, spId]
-                );
-            } catch (err2) {
-                await db.query(
-                    `INSERT INTO allocations (user_id, supervisor_id) VALUES (?, ?)`,
-                    [sId, spId]
-                );
-            }
-        }
-
-        try {
-            await db.query(`UPDATE students SET supervisor_id = ? WHERE user_id = ?`, [spId, sId]);
-        } catch (e1) {
-            try {
-                await db.query(`UPDATE students SET supervisor_id = ? WHERE id = ?`, [spId, sId]);
-            } catch (e2) {}
-        }
+            await db.query(`UPDATE students SET supervisor_id = ? WHERE user_id = ? OR student_id = ? OR id = ?`, [spId, sId, sId, sId]);
+        } catch (e) {}
 
         return res.json({ message: 'Supervisor allocated successfully' });
     } catch (err) {
-        console.error('ALLOCATION ROUTE ERROR:', err.message);
         return res.status(500).json({ error: 'Allocation failed: ' + err.message });
     }
 });
@@ -459,14 +409,13 @@ app.post('/api/notifications/:id/read', async (req, res) => {
     }
 });
 
-// --- 4. DELIVERABLES (CHAPTER UPLOADS) ---
+// --- 4. DELIVERABLES ---
 
 app.post('/api/deliverables', upload.single('file'), async (req, res) => {
     try {
         const body = req.body || {};
         const studentId = body.student_id || body.studentId;
         const chapterTitle = body.chapter_title || body.chapterTitle || 'Chapter Submission';
-        
         const originalName = req.file ? req.file.originalname : 'document.pdf';
         const fileUrl = req.file ? `/uploads/${req.file.filename}` : 'uploaded_document.pdf';
 
@@ -474,59 +423,64 @@ app.post('/api/deliverables', upload.single('file'), async (req, res) => {
             return res.status(400).json({ error: 'Missing student identifier.' });
         }
 
-        const [columns] = await db.query(`SHOW COLUMNS FROM deliverables`);
-        const colNames = columns.map(c => c.Field);
-
-        const insertData = {};
-
-        if (colNames.includes('student_id')) insertData['student_id'] = studentId;
-        else if (colNames.includes('user_id')) insertData['user_id'] = studentId;
-
-        if (colNames.includes('chapter_title')) insertData['chapter_title'] = chapterTitle;
-        else if (colNames.includes('title')) insertData['title'] = chapterTitle;
-
-        if (colNames.includes('file_name')) insertData['file_name'] = originalName;
-        if (colNames.includes('filename')) insertData['filename'] = originalName;
-
-        if (colNames.includes('file_url')) insertData['file_url'] = fileUrl;
-        else if (colNames.includes('file_path')) insertData['file_path'] = fileUrl;
-        else if (colNames.includes('file')) insertData['file'] = fileUrl;
-
-        if (colNames.includes('status')) insertData['status'] = 'SUBMITTED';
-
-        const keys = Object.keys(insertData);
-        const values = Object.values(insertData);
-        const placeholders = keys.map(() => '?').join(', ');
-
-        const sql = `INSERT INTO deliverables (${keys.join(', ')}) VALUES (${placeholders})`;
-        await db.query(sql, values);
+        await db.query(
+            `INSERT INTO deliverables (student_id, chapter_title, file_name, file_url, status) VALUES (?, ?, ?, ?, 'SUBMITTED')`,
+            [studentId, chapterTitle, originalName, fileUrl]
+        );
 
         return res.json({ message: 'Chapter uploaded successfully!' });
     } catch (err) {
-        console.error('DELIVERABLES UPLOAD CRASH:', err.message);
         return res.status(500).json({ error: 'Upload failed: ' + err.message });
     }
 });
 
 app.get('/api/deliverables', async (req, res) => {
     try {
-        const [rows] = await db.query(`
-            SELECT 
-                d.*, 
-                COALESCE(u.name, 'Student') AS student_name, 
-                COALESCE(s.matric_no, 'N/A') AS matric_no 
-            FROM deliverables d 
-            LEFT JOIN users u ON d.student_id = u.id OR d.student_id = u.user_id 
-            LEFT JOIN students s ON d.student_id = s.user_id OR d.student_id = s.id
-            ORDER BY d.created_at DESC
-        `).catch(async () => {
-            const [simpleRows] = await db.query(`SELECT * FROM deliverables ORDER BY id DESC`);
-            return [simpleRows];
-        });
+        const { supervisorId, studentId, role } = req.query;
 
-        return res.json(rows || []);
+        let query = `
+            SELECT 
+                d.*,
+                COALESCE(u.name, u.full_name, 'Student') AS student_name,
+                s.matric_no
+            FROM deliverables d
+            LEFT JOIN students s ON (d.student_id = s.student_id OR d.student_id = s.id OR d.student_id = s.user_id)
+            LEFT JOIN users u ON (s.user_id = u.id OR d.student_id = u.id)
+        `;
+        const params = [];
+
+        // 1. Student view: strictly their own
+        if (role === 'STUDENT' || (studentId && role !== 'COORDINATOR' && role !== 'SUPERVISOR')) {
+            const sid = studentId || supervisorId;
+            query += `
+                WHERE d.student_id = ? 
+                   OR d.student_id = (SELECT user_id FROM students WHERE student_id = ? OR id = ? LIMIT 1)
+                   OR s.user_id = ?
+            `;
+            params.push(sid, sid, sid, sid);
+        }
+        // 2. Supervisor view: only allocated students
+        else if (supervisorId && role === 'SUPERVISOR') {
+            query += `
+                WHERE d.student_id IN (
+                    SELECT student_id FROM supervisor_allocations WHERE staff_id = ? OR staff_id = (SELECT staff_id FROM staff WHERE user_id = ? LIMIT 1)
+                    UNION
+                    SELECT student_id FROM allocations WHERE supervisor_id = ? OR supervisor_id = (SELECT staff_id FROM staff WHERE user_id = ? LIMIT 1)
+                )
+                OR s.user_id IN (
+                    SELECT student_id FROM supervisor_allocations WHERE staff_id = ? OR staff_id = (SELECT staff_id FROM staff WHERE user_id = ? LIMIT 1)
+                    UNION
+                    SELECT student_id FROM allocations WHERE supervisor_id = ? OR supervisor_id = (SELECT staff_id FROM staff WHERE user_id = ? LIMIT 1)
+                )
+            `;
+            params.push(supervisorId, supervisorId, supervisorId, supervisorId, supervisorId, supervisorId, supervisorId, supervisorId);
+        }
+
+        query += ` ORDER BY d.created_at DESC`;
+
+        const [rows] = await db.query(query, params);
+        return res.json(rows);
     } catch (err) {
-        console.error('DELIVERABLES FETCH ERROR:', err.message);
         return res.json([]);
     }
 });
@@ -558,21 +512,12 @@ app.post('/api/deadlines', async (req, res) => {
             }
         }
 
-        try {
-            await db.query(
-                `INSERT INTO project_deadlines (title, deadline_date, description) VALUES (?, ?, ?)`,
-                [title, d, description || '']
-            );
-            return res.json({ message: 'Deadline established successfully' });
-        } catch (e1) {
-            await db.query(
-                `INSERT INTO deadlines (title, due_date, description) VALUES (?, ?, ?)`,
-                [title, d, description || '']
-            );
-            return res.json({ message: 'Deadline established successfully' });
-        }
+        await db.query(
+            `INSERT INTO project_deadlines (title, deadline_date, description) VALUES (?, ?, ?)`,
+            [title, d, description || '']
+        );
+        return res.json({ message: 'Deadline established successfully' });
     } catch (err) {
-        console.error('DEADLINE POST ERROR:', err.message);
         return res.status(500).json({ error: err.message });
     }
 });
@@ -589,16 +534,15 @@ function calculateGrade(total) {
 
 app.get('/api/grades', async (req, res) => {
     try {
-        const [uCols] = await db.query(`SHOW COLUMNS FROM users`);
-        const idCol = uCols.some(c => c.Field === 'id') ? 'id' : 'user_id';
-
         const [grades] = await db.query(`
-            SELECT g.*, u.full_name AS grader_name, su.full_name AS student_name, st.matric_no, st.department
+            SELECT g.*, COALESCE(u.name, u.full_name, 'Supervisor') AS grader_name, 
+                   COALESCE(su.name, su.full_name, 'Student') AS student_name, 
+                   st.matric_no, st.department
             FROM project_grades g
-            JOIN staff staff_rec ON g.graded_by = staff_rec.staff_id
-            JOIN users u ON staff_rec.user_id = u.\`${idCol}\`
-            JOIN students st ON g.student_id = st.student_id
-            JOIN users su ON st.user_id = su.\`${idCol}\`
+            LEFT JOIN staff staff_rec ON g.graded_by = staff_rec.staff_id
+            LEFT JOIN users u ON staff_rec.user_id = u.id
+            LEFT JOIN students st ON g.student_id = st.student_id OR g.student_id = st.id OR g.student_id = st.user_id
+            LEFT JOIN users su ON st.user_id = su.id
         `);
         res.json(grades);
     } catch (error) {
@@ -607,36 +551,36 @@ app.get('/api/grades', async (req, res) => {
 });
 
 app.get('/api/grades/student/:studentId', async (req, res) => {
-  try {
-    const { studentId } = req.params;
+    try {
+        const { studentId } = req.params;
+        const { matric } = req.query;
 
-    // Direct student lookup using project_grades table
-    const [grades] = await db.query(
-      `SELECT g.*, 'Dalhatu Zubairu' AS grader_name 
-       FROM project_grades g
-       WHERE g.student_id = ? 
-          OR g.student_id = (SELECT user_id FROM students WHERE student_id = ? LIMIT 1)
-          OR g.student_id = (SELECT student_id FROM students WHERE user_id = ? LIMIT 1)
-          OR g.student_id = (SELECT id FROM users WHERE id = ? LIMIT 1)
-       ORDER BY g.graded_at DESC LIMIT 1`,
-      [studentId, studentId, studentId, studentId]
-    );
+        if (!studentId || studentId === 'undefined' || studentId === 'null') {
+            return res.json(null);
+        }
 
-    if (grades && grades.length > 0) {
-      return res.json(grades[0]);
+        const [grades] = await db.query(
+            `SELECT g.*, COALESCE(u.name, u.full_name, 'Supervisor') AS grader_name 
+             FROM project_grades g
+             LEFT JOIN staff st ON g.graded_by = st.staff_id
+             LEFT JOIN users u ON (st.user_id = u.id OR g.graded_by = u.id)
+             WHERE g.student_id = ? 
+                OR g.student_id = (SELECT user_id FROM students WHERE (student_id = ? OR id = ? OR matric_no = ?) LIMIT 1)
+                OR g.student_id = (SELECT student_id FROM students WHERE (user_id = ? OR matric_no = ?) LIMIT 1)
+             ORDER BY g.graded_at DESC LIMIT 1`,
+            [studentId, studentId, studentId, matric || '', studentId, matric || '']
+        );
+
+        if (grades && grades.length > 0) {
+            return res.json(grades[0]);
+        }
+
+        return res.json(null);
+    } catch (error) {
+        return res.json(null);
     }
-
-    // Fallback: If student_id was recorded as null or unlinked during testing, return latest grade
-    const [latest] = await db.query(
-      `SELECT *, 'Dalhatu Zubairu' AS grader_name FROM project_grades ORDER BY graded_at DESC LIMIT 1`
-    );
-
-    return res.json(latest[0] || null);
-  } catch (error) {
-    console.error('FETCH STUDENT GRADE ERROR:', error.message);
-    res.status(500).json({ error: 'Failed to fetch student grade' });
-  }
 });
+
 app.post('/api/grades', async (req, res) => {
     const { student_id, documentation_score, implementation_score, presentation_score, remarks, staff_id } = req.body;
 
@@ -667,48 +611,62 @@ app.post('/api/grades', async (req, res) => {
                 graded_by = VALUES(graded_by)
         `, [student_id, doc, impl, pres, total, letterGrade, remarks || '', validStaffId]);
 
-        try {
-            const [studentUser] = await db.query(
-                `SELECT user_id FROM students WHERE user_id = ? OR id = ? LIMIT 1`,
-                [student_id, student_id]
-            );
-            if (studentUser && studentUser.length > 0) {
-                const targetUserId = studentUser[0].user_id || student_id;
-                await db.query(
-                    `INSERT INTO system_notifications (user_id, message) VALUES (?, ?)`,
-                    [targetUserId, `Your final project defense evaluation has been submitted: Total Score ${total}% (Grade: ${letterGrade}).`]
-                ).catch(() => {});
-            }
-        } catch (notifErr) {
-            console.log('Student notification skipped:', notifErr.message);
-        }
-
-        res.json({ message: 'Grade recorded successfully', total_score: total, letter_grade: letterGrade });
+        return res.json({ message: 'Grade recorded successfully', total_score: total, letter_grade: letterGrade });
     } catch (error) {
-        res.status(500).json({ error: `Failed to record grade: ${error.message}` });
+        return res.status(500).json({ error: `Failed to record grade: ${error.message}` });
     }
 });
 
-// --- 7. PROPOSALS & REVIEW ENGINE ---
+// --- 7. PROPOSALS ---
 
 app.get('/api/proposals', async (req, res) => {
     try {
-        const [rows] = await db.query(`SELECT * FROM proposals ORDER BY 1 DESC`);
-        
-        const enriched = rows.map(r => ({
-            ...r,
-            proposal_id: r.proposal_id || r.id,
-            student_name: r.student_name || r.name || 'Student',
-            matric_no: r.matric_no || 'U26/CS/1008',
-            department: r.department || 'Computer Science',
-            latest_version: r.latest_version || r.version || 1,
-            status: r.status || 'SUBMITTED'
-        }));
+        const { supervisorId, studentId, role } = req.query;
 
-        res.json(enriched);
-    } catch (error) {
-        console.error('PROPOSALS FETCH ERROR:', error.message);
-        res.json([]);
+        let query = `
+            SELECT 
+                p.*,
+                COALESCE(u.name, u.full_name, 'Student') AS student_name,
+                s.matric_no
+            FROM proposals p
+            LEFT JOIN students s ON (p.student_id = s.student_id OR p.student_id = s.id OR p.student_id = s.user_id)
+            LEFT JOIN users u ON (s.user_id = u.id OR p.student_id = u.id)
+        `;
+        const params = [];
+
+        // 1. Student view: strictly their own
+        if (role === 'STUDENT' || (studentId && role !== 'COORDINATOR' && role !== 'SUPERVISOR')) {
+            const sid = studentId || supervisorId;
+            query += `
+                WHERE p.student_id = ? 
+                   OR p.student_id = (SELECT user_id FROM students WHERE student_id = ? OR id = ? LIMIT 1)
+                   OR s.user_id = ?
+            `;
+            params.push(sid, sid, sid, sid);
+        }
+        // 2. Supervisor view: only allocated students
+        else if (supervisorId && role === 'SUPERVISOR') {
+            query += `
+                WHERE p.student_id IN (
+                    SELECT student_id FROM supervisor_allocations WHERE staff_id = ? OR staff_id = (SELECT staff_id FROM staff WHERE user_id = ? LIMIT 1)
+                    UNION
+                    SELECT student_id FROM allocations WHERE supervisor_id = ? OR supervisor_id = (SELECT staff_id FROM staff WHERE user_id = ? LIMIT 1)
+                )
+                OR s.user_id IN (
+                    SELECT student_id FROM supervisor_allocations WHERE staff_id = ? OR staff_id = (SELECT staff_id FROM staff WHERE user_id = ? LIMIT 1)
+                    UNION
+                    SELECT student_id FROM allocations WHERE supervisor_id = ? OR supervisor_id = (SELECT staff_id FROM staff WHERE user_id = ? LIMIT 1)
+                )
+            `;
+            params.push(supervisorId, supervisorId, supervisorId, supervisorId, supervisorId, supervisorId, supervisorId, supervisorId);
+        }
+
+        query += ` ORDER BY p.id DESC`;
+
+        const [rows] = await db.query(query, params);
+        return res.json(rows);
+    } catch (err) {
+        return res.json([]);
     }
 });
 
@@ -726,94 +684,42 @@ app.get('/api/proposals/:id/versions', async (req, res) => {
 
 app.post('/api/proposals', async (req, res) => {
     const { title, problem_statement, aim, objectives, student_id } = req.body;
-
     if (!title) {
         return res.status(400).json({ error: 'Project title is required.' });
     }
 
     try {
-        const [columns] = await db.query(`SHOW COLUMNS FROM proposals`);
-        const existingColNames = columns.map(c => c.Field.toLowerCase());
-
-        const candidates = {
-            title: title.trim(),
-            project_title: title.trim(),
-            problem_statement: problem_statement || '',
-            aim: aim || '',
-            objectives: objectives || '',
-            status: 'PENDING',
-            student_id: student_id || 1,
-            user_id: student_id || 1,
-            created_at: new Date()
-        };
-
-        const insertKeys = [];
-        const insertVals = [];
-
-        for (const [key, val] of Object.entries(candidates)) {
-            if (existingColNames.includes(key.toLowerCase())) {
-                insertKeys.push(key);
-                insertVals.push(val);
-            }
-        }
-
-        if (insertKeys.length === 0) {
-            const targetCol = existingColNames.find(c => !c.includes('id')) || existingColNames[0];
-            const [fallback] = await db.query(`INSERT INTO proposals (${targetCol}) VALUES (?)`, [title.trim()]);
-            return res.status(201).json({ message: 'Proposal submitted successfully', proposal_id: fallback.insertId });
-        }
-
-        const placeholders = insertKeys.map(() => '?').join(', ');
-        const query = `INSERT INTO proposals (${insertKeys.join(', ')}) VALUES (${placeholders})`;
-
-        const [result] = await db.query(query, insertVals);
+        const [result] = await db.query(
+            `INSERT INTO proposals (title, problem_statement, aim, objectives, student_id, status) VALUES (?, ?, ?, ?, ?, 'PENDING')`,
+            [title.trim(), problem_statement || '', aim || '', objectives || '', student_id]
+        );
 
         return res.status(201).json({
             message: 'Proposal submitted successfully',
             proposal_id: result.insertId
         });
     } catch (error) {
-        console.error('PROPOSAL SUBMISSION ERROR:', error.message);
         return res.status(500).json({ error: error.message });
     }
 });
 
-// Single unified proposal review handler
 app.put('/api/proposals/:id/review', async (req, res) => {
     try {
         const { id } = req.params;
         const { status, remarks } = req.body;
 
-        const [columns] = await db.query(`SHOW COLUMNS FROM proposals`);
-        const colNames = columns.map(c => c.Field);
-
-        const primaryCol = colNames.includes('id') ? 'id' : 'proposal_id';
-        const updates = ['status = ?'];
-        const values = [status || 'APPROVED'];
-
-        if (colNames.includes('remarks')) {
-            updates.push('remarks = ?');
-            values.push(remarks || null);
-        } else if (colNames.includes('comments')) {
-            updates.push('comments = ?');
-            values.push(remarks || null);
-        } else if (colNames.includes('feedback')) {
-            updates.push('feedback = ?');
-            values.push(remarks || null);
-        }
-
-        values.push(id);
-        const sql = `UPDATE proposals SET ${updates.join(', ')} WHERE ${primaryCol} = ?`;
-        await db.query(sql, values);
+        await db.query(
+            `UPDATE proposals SET status = ?, remarks = ? WHERE id = ?`,
+            [status || 'APPROVED', remarks || null, id]
+        );
 
         return res.json({ message: 'Proposal review updated successfully' });
     } catch (err) {
-        console.error('PROPOSAL REVIEW ERROR:', err.message);
         return res.status(500).json({ error: err.message });
     }
 });
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });
