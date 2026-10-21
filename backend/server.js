@@ -256,6 +256,9 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     try {
+        const bcrypt = require('bcryptjs');
+        const jwt = require('jsonwebtoken');
+
         const [users] = await db.query(
             `SELECT * FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1`,
             [email.trim()]
@@ -266,14 +269,6 @@ app.post('/api/auth/login', async (req, res) => {
         }
 
         const user = users[0];
-        // Auto-fix existing accounts that should be coordinators
-        if (user.email && (user.email.toLowerCase().includes('anthony') || user.email.toLowerCase().includes('coord'))) {
-            user.role = 'COORDINATOR';
-            await db.query(`UPDATE users SET role = 'COORDINATOR' WHERE id = ? OR user_id = ?`, [user.id || user.user_id, user.id || user.user_id]);
-            try {
-                await db.query(`UPDATE staff SET role = 'COORDINATOR' WHERE user_id = ?`, [user.id || user.user_id]);
-            } catch (err) {}
-        }
         const rawHash = user.password_hash || user.password;
         const validPassword = await bcrypt.compare(password, rawHash);
 
@@ -282,12 +277,20 @@ app.post('/api/auth/login', async (req, res) => {
         }
 
         const userId = user.user_id || user.id;
-        let rawUserRole = (user.role || '').toUpperCase();
-        let role = rawUserRole.includes('COORD') ? 'COORDINATOR' : (rawUserRole || 'STUDENT');
+        let role = (user.role || 'STUDENT').toUpperCase().trim();
         let studentId = null;
         let staffId = null;
         let matricNo = null;
         let department = 'Computer Science';
+
+        // Auto-detect coordinator designation
+        if (
+            role.includes('COORD') || 
+            (user.email && user.email.toLowerCase().includes('anthony')) ||
+            (user.email && user.email.toLowerCase().includes('coord'))
+        ) {
+            role = 'COORDINATOR';
+        }
 
         try {
             const [studentRows] = await db.query(
@@ -299,7 +302,7 @@ app.post('/api/auth/login', async (req, res) => {
                 studentId = s.student_id || s.id;
                 matricNo = s.matric_no;
                 if (s.department) department = s.department;
-                role = 'STUDENT';
+                if (role !== 'COORDINATOR') role = 'STUDENT';
             }
         } catch (e) {}
 
@@ -312,31 +315,12 @@ app.post('/api/auth/login', async (req, res) => {
                 const st = staffRows[0];
                 staffId = st.staff_id || st.id;
                 if (st.department) department = st.department;
-                
-                const staffDesignation = (st.designation || '').toLowerCase();
-                const staffRoleCol = (st.role || '').toLowerCase();
-
-                if (
-                    role === 'COORDINATOR' ||
-                    rawUserRole.includes('COORD') ||
-                    staffDesignation.includes('coord') ||
-                    staffRoleCol.includes('coord') ||
-                    (user.email && user.email.toLowerCase().includes('coord'))
-                ) {
-                    role = 'COORDINATOR';
-                } else {
-                    role = 'SUPERVISOR';
-                }
             }
         } catch (e) {}
 
-        if (user.email && (user.email.toLowerCase().includes('coord') || user.email.toLowerCase() === 'maryamdalhatu@gmail.com')) {
-            role = 'COORDINATOR';
-        }
-
         const token = jwt.sign(
             { userId, email: user.email, role, department },
-            JWT_SECRET,
+            process.env.JWT_SECRET || 'pms_secret_key_2026',
             { expiresIn: '24h' }
         );
 
@@ -355,8 +339,8 @@ app.post('/api/auth/login', async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('LOGIN ERROR:', error);
-        return res.status(500).json({ error: 'Internal login error' });
+        console.error('LOGIN ERROR:', error.message);
+        return res.status(500).json({ error: 'Internal login error: ' + error.message });
     }
 });
 
